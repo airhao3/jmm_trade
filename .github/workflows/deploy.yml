@@ -15,12 +15,6 @@ on:
   push:
     branches:
       - main
-    paths-ignore:
-      - "**.md"
-      - "docs/**"
-      - ".github/workflows/ci.yml"
-      - ".github/workflows/e2e.yml"
-      - ".github/workflows/release.yml"
 
 env:
   FORCE_READ_ONLY: "true"
