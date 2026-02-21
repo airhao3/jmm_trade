@@ -65,8 +65,24 @@ class TelegramBotHandler:
 
         # Start polling in background
         self._running = True
+        self._conflict_logged = False
         await self._app.initialize()
         await self._app.start()
+
+        async def _error_handler(update, context) -> None:
+            """Handle polling errors gracefully."""
+            err = context.error
+            if err and "Conflict" in str(err):
+                if not self._conflict_logged:
+                    self._conflict_logged = True
+                    logger.warning(
+                        "Telegram bot conflict: another instance is already polling. "
+                        "Bot commands disabled for this instance."
+                    )
+            else:
+                logger.error(f"Telegram bot error: {err}")
+
+        self._app.add_error_handler(_error_handler)
         await self._app.updater.start_polling(drop_pending_updates=True)
         logger.info("Telegram bot command handler started")
 
