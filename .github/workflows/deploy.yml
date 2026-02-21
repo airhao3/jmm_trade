@@ -24,12 +24,15 @@ on:
 
 env:
   FORCE_READ_ONLY: "true"
+  PYTHONPATH: ${{ github.workspace }}
 
 jobs:
   deploy:
     name: Deploy to VPS
     runs-on: ubuntu-latest
     environment: ${{ github.event.inputs.environment || 'production' }}
+    # Skip deployment if VPS secrets are not configured
+    if: ${{ secrets.VPS_HOST != '' }}
 
     steps:
       - name: Checkout code
