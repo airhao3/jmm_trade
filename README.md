@@ -200,3 +200,4 @@ pytest tests/ --cov=src --cov-report=term-missing
 ## License
 
 Private – Internal use only.
+# Test deploy - Sun Feb 22 00:18:48 CST 2026
