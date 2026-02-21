@@ -329,9 +329,10 @@ class TelegramBotHandler:
             return
 
         try:
+            from src.config.models import DatabaseConfig
             from src.data.database import Database
 
-            db = Database("data/trades.db")
+            db = Database(DatabaseConfig(path="data/trades.db"))
             await db.connect()
             trades = await db.get_all_trades()
             await db.close()
@@ -373,9 +374,10 @@ class TelegramBotHandler:
             return
 
         try:
+            from src.config.models import DatabaseConfig
             from src.data.database import Database
 
-            db = Database("data/trades.db")
+            db = Database(DatabaseConfig(path="data/trades.db"))
             await db.connect()
             trades = await db.get_all_trades()
             await db.close()
