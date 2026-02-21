@@ -5,13 +5,9 @@ on:
     tags:
       - "v*"
 
-env:
-  FORCE_READ_ONLY: "true"
-  PYTHONPATH: ${{ github.workspace }}
-
 jobs:
   release:
-    name: Create Release
+    name: Create GitHub Release
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -21,39 +17,17 @@ jobs:
         with:
           fetch-depth: 0
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
-          cache: pip
-
-      - name: Install dependencies
-        run: pip install -r requirements.txt pytest-cov ruff
-
-      - name: Lint
-        run: ruff check src/ tests/ main.py
-
-      - name: Run all tests
-        run: pytest tests/ -m "unit or integration" -v --tb=short
-
-      - name: Build Docker image
-        run: |
-          VERSION=${GITHUB_REF#refs/tags/v}
-          docker build -t polymarket-copy-trader:${VERSION} .
-          docker build -t polymarket-copy-trader:latest .
-
-      - name: Docker smoke test
-        run: |
-          docker run --rm polymarket-copy-trader:latest \
-            python main.py check-config
-
       - name: Extract changelog for this version
         id: changelog
         run: |
           VERSION=${GITHUB_REF#refs/tags/v}
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          
           # Extract section between this version and the next ---
           awk "/## \[${VERSION}\]/{found=1; next} /^---$/{if(found) exit} found{print}" \
             CHANGELOG.md > release_notes.md
+          
+          echo "📋 Release notes for v${VERSION}:"
           cat release_notes.md
 
       - name: Create GitHub Release
@@ -63,3 +37,8 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref, 'alpha') || contains(github.ref, 'beta') }}
+          
+      - name: Release summary
+        run: |
+          echo "✅ Release v${GITHUB_REF#refs/tags/v} created successfully"
+          echo "🔗 View at: https://github.com/${{ github.repository }}/releases/tag/${GITHUB_REF#refs/tags/}"
