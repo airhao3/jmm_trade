@@ -60,6 +60,11 @@ class BehaviorProfile:
     unique_markets: int = 0
     concentration_pct: float = 0.0  # % of volume in top market
 
+    # Advanced signals
+    accumulation_score: float = 0.0   # 0-1, drip-buying pattern strength
+    wash_trade_score: float = 0.0     # 0-1, opposing trades in correlated mkts
+    is_accumulating: bool = False     # active drip-buy detected
+
     # Confidence
     confidence: float = 0.0  # 0-1, based on sample size
     sample_size: int = 0
@@ -67,6 +72,9 @@ class BehaviorProfile:
     # Follow recommendation
     follow_score: int = 0     # 0-10
     follow_reason: str = ""
+
+    # Adaptive polling
+    poll_interval: float = 2.0  # recommended seconds between polls
 
     last_updated: float = 0.0
 
@@ -164,16 +172,23 @@ class SmartMoneyProfiler:
         else:
             p.confidence = 0.2
 
+        # ── Advanced signals ──
+        p.accumulation_score, p.is_accumulating = self._detect_accumulation(trades)
+        p.wash_trade_score = self._detect_wash_trading(trades)
+
         # ── Classify archetype ──
         p.archetype = self._classify(p)
         p.follow_score, p.follow_reason = self._score(p)
+        p.poll_interval = self._assign_poll_interval(p)
         p.last_updated = time.monotonic()
 
         logger.info(
             f"[{target.nickname}] Profile: {p.archetype.value} "
             f"(score={p.follow_score}/10, WR={p.win_rate}%, "
             f"avg=${p.avg_trade_usd:.0f}, freq={p.trades_per_hour:.1f}/h, "
-            f"markets={p.unique_markets})"
+            f"markets={p.unique_markets}, "
+            f"accum={p.accumulation_score:.2f}, wash={p.wash_trade_score:.2f}, "
+            f"poll={p.poll_interval}s)"
         )
         return p
 
@@ -249,5 +264,188 @@ class SmartMoneyProfiler:
             score += 1
             reasons.append("Diversified")
 
+        # Accumulation bonus
+        if p.is_accumulating:
+            score += 2
+            reasons.append("🎯 Active accumulation")
+        elif p.accumulation_score > 0.5:
+            score += 1
+            reasons.append("Drip-buy pattern")
+
+        # Wash trading penalty
+        if p.wash_trade_score > 0.5:
+            score -= 2
+            reasons.append("⚠️ Wash trade suspect")
+        elif p.wash_trade_score > 0.3:
+            score -= 1
+            reasons.append("Possible rebate farming")
+
         score = max(0, min(10, score))
         return score, " | ".join(reasons) if reasons else "Neutral"
+
+    # ── Accumulation fingerprint ─────────────────────────
+
+    @staticmethod
+    def _detect_accumulation(
+        trades: list[dict[str, Any]],
+    ) -> tuple[float, bool]:
+        """Detect drip-buying pattern (steady small buys over time).
+
+        A WHALE splitting $2000 into 10x$200 over 10 minutes is MORE
+        informative than a single $2000 buy — they're deliberately
+        avoiding slippage because they expect further price movement.
+
+        Returns (score 0-1, is_currently_accumulating).
+        """
+        if len(trades) < 5:
+            return 0.0, False
+
+        # Group BUY trades by conditionId in recent window (last 30 min)
+        now_ts = max(int(t.get("timestamp", 0)) for t in trades)
+        window = 30 * 60  # 30 minutes
+        recent_buys: dict[str, list[dict]] = {}
+
+        for t in trades:
+            ts = int(t.get("timestamp", 0))
+            if t.get("side") == "BUY" and (now_ts - ts) < window:
+                cid = t.get("conditionId", "")
+                if cid:
+                    recent_buys.setdefault(cid, []).append(t)
+
+        best_score = 0.0
+        is_active = False
+
+        for _cid, buys in recent_buys.items():
+            if len(buys) < 3:
+                continue
+
+            # Check regularity: are the buys roughly evenly spaced?
+            timestamps = sorted(int(b.get("timestamp", 0)) for b in buys)
+            intervals = [
+                timestamps[i + 1] - timestamps[i]
+                for i in range(len(timestamps) - 1)
+            ]
+
+            if not intervals:
+                continue
+
+            avg_interval = sum(intervals) / len(intervals)
+            if avg_interval <= 0:
+                continue
+
+            # Coefficient of variation of intervals (lower = more regular)
+            variance = sum((iv - avg_interval) ** 2 for iv in intervals) / len(intervals)
+            cv = (variance ** 0.5) / avg_interval if avg_interval > 0 else 999
+
+            # Check size consistency
+            sizes = [
+                float(b.get("price", 0)) * float(b.get("size", 0))
+                for b in buys
+            ]
+            avg_size = sum(sizes) / len(sizes) if sizes else 0
+            size_cv = 0.0
+            if avg_size > 0 and len(sizes) > 1:
+                s_var = sum((s - avg_size) ** 2 for s in sizes) / len(sizes)
+                size_cv = (s_var ** 0.5) / avg_size
+
+            # Score: regular intervals + consistent sizes + enough buys
+            regularity = max(0, 1 - cv)  # 1.0 = perfectly regular
+            consistency = max(0, 1 - size_cv)  # 1.0 = all same size
+            count_factor = min(len(buys) / 10, 1.0)  # caps at 10 buys
+
+            score = round(regularity * 0.4 + consistency * 0.3 + count_factor * 0.3, 3)
+
+            # Is it very recent? (last 5 min)
+            last_buy_age = now_ts - timestamps[-1]
+            if score > 0.4 and last_buy_age < 300:
+                is_active = True
+
+            best_score = max(best_score, score)
+
+        return round(best_score, 3), is_active
+
+    # ── Wash trading / rebate farming detection ──────────
+
+    @staticmethod
+    def _detect_wash_trading(trades: list[dict[str, Any]]) -> float:
+        """Detect opposing trades in correlated/mutual-exclusive markets.
+
+        If an address buys YES on "BTC Up" AND buys YES on "BTC Down"
+        within a short window, they're likely wash trading for volume
+        rebates rather than expressing a directional view.
+
+        Returns score 0-1 (0 = clean, 1 = definite wash).
+        """
+        if len(trades) < 10:
+            return 0.0
+
+        # Group trades by base market (strip outcome from conditionId)
+        # Use event slug or title prefix to match correlated markets
+        window = 15 * 60  # 15 minutes
+
+        # Build (market_key, side, outcome, timestamp) tuples
+        entries: list[tuple[str, str, str, int]] = []
+        for t in trades:
+            title = t.get("title", "")
+            side = t.get("side", "")
+            outcome = t.get("outcome", "")
+            ts = int(t.get("timestamp", 0))
+            # Use first 30 chars of title as market key (strips outcome suffix)
+            market_key = title[:30].strip() if title else ""
+            if market_key and side:
+                entries.append((market_key, side, outcome, ts))
+
+        if len(entries) < 4:
+            return 0.0
+
+        # Find opposing entries in same market within window
+        opposing_count = 0
+        total_pairs = 0
+
+        for i, (mk1, side1, out1, ts1) in enumerate(entries):
+            for j in range(i + 1, len(entries)):
+                mk2, side2, out2, ts2 = entries[j]
+                if mk1 != mk2:
+                    continue
+                if abs(ts2 - ts1) > window:
+                    continue
+
+                total_pairs += 1
+                # Same market, different outcomes, both BUY = hedge/wash
+                if side1 == "BUY" and side2 == "BUY" and out1 != out2:
+                    opposing_count += 1
+                # Same market, opposite sides on same outcome = flip
+                elif out1 == out2 and side1 != side2:
+                    opposing_count += 1
+
+        if total_pairs == 0:
+            return 0.0
+
+        return round(min(opposing_count / max(total_pairs, 1), 1.0), 3)
+
+    # ── Adaptive poll interval ───────────────────────────
+
+    @staticmethod
+    def _assign_poll_interval(p: BehaviorProfile) -> float:
+        """Assign poll interval based on archetype and activity level.
+
+        SNIPER:  0.5s (high value, must catch immediately)
+        WHALE:   1.0s (important but less urgent)
+        UNKNOWN: 2.0s (default)
+        SCALPER: 5.0s (low value, save rate limit)
+        NOISE:  10.0s (waste of resources)
+        """
+        intervals = {
+            Archetype.SNIPER: 0.5,
+            Archetype.WHALE: 1.0,
+            Archetype.UNKNOWN: 2.0,
+            Archetype.SCALPER: 5.0,
+            Archetype.NOISE: 10.0,
+        }
+        base = intervals.get(p.archetype, 2.0)
+
+        # Boost if actively accumulating
+        if p.is_accumulating:
+            base = min(base, 0.5)
+
+        return base

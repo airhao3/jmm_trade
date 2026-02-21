@@ -79,6 +79,22 @@ class TradeMonitor:
         self._total_poll_latency += latency
         return total_new, latency
 
+    async def poll_target_once(self, target: TargetAccount) -> tuple[int, float]:
+        """Poll a SINGLE target. Used by adaptive per-target poll loops.
+
+        Returns (new_trade_count, latency_seconds).
+        """
+        t0 = time.monotonic()
+        try:
+            new_count = await self._poll_target(target)
+        except Exception as e:
+            logger.error(f"Poll error for {target.nickname}: {e}")
+            new_count = 0
+        latency = time.monotonic() - t0
+        self._poll_count += 1
+        self._total_poll_latency += latency
+        return new_count, latency
+
     async def poll_loop(self) -> None:
         """Continuously poll at the configured interval."""
         interval = self.config.monitoring.poll_interval

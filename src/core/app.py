@@ -52,6 +52,8 @@ class Application:
         # WebSocket supplementary state
         self._ws_activity_flag: bool = False
         self._price_cache: dict[str, float] = {}
+        self._burst_targets: set[str] = set()  # addresses to burst-poll
+        self._asset_to_targets: dict[str, set[str]] = {}  # asset_id -> target addresses
 
         # Trade enricher & alert engine (initialised in run())
         self.enricher: TradeEnricher | None = None
@@ -248,6 +250,29 @@ class Application:
                 )
                 return  # do not notify or simulate
 
+        # ── Exit strategy: detect target reducing/exiting ────
+        if enriched and enriched.position.position_change in ("EXIT", "REDUCE"):
+            exit_msg = (
+                f"🚨 EXIT SIGNAL\n\n"
+                f"👤 {target.nickname} is "
+                f"{'EXITING' if enriched.position.position_change == 'EXIT' else 'REDUCING'} "
+                f"position!\n"
+                f"📊 {enriched.market_title}\n"
+                f"🔴 SELL {enriched.outcome} @ ${enriched.price:.4f}\n"
+                f"💰 Size: ${enriched.usd_value:.2f}\n"
+                f"📉 Remaining: {enriched.position.total_shares:.1f} shares\n\n"
+                f"⚠️ Consider closing any copy positions in this market."
+            )
+            if self.notifier:
+                await self.notifier.notify(
+                    EventType.NEW_TRADE,
+                    {"_rich_message": exit_msg},
+                )
+            logger.warning(
+                f"[{target.nickname}] EXIT SIGNAL: "
+                f"{enriched.position.position_change} on {enriched.market_title}"
+            )
+
         # ── Send rich notification ─────────────────────────
         if self.notifier:
             if enriched:
@@ -382,59 +407,96 @@ class Application:
 
         logger.info(f"Startup test complete (avg API latency: {api.avg_latency * 1000:.0f}ms)")
 
-    # ── Poll loop with metrics sync ──────────────────────
+    # ── Adaptive per-target poll loops ───────────────────
 
     async def _poll_loop_with_metrics(self) -> None:
-        """Poll REST API /trades to detect new trades from target accounts.
+        """Launch independent poll loops per target with adaptive intervals.
 
-        This is the PRIMARY and ONLY reliable method for detecting trades
-        from specific wallet addresses. Polymarket WebSocket channels do NOT
-        expose per-user trade data:
-          - 'market' channel: orderbook/price changes only
-          - 'user' channel: requires auth, shows only YOUR orders
-          - No public channel shows other users' trades
+        Intervals determined by SmartMoneyProfiler archetype:
+          SNIPER  → 0.5s  (high value, catch immediately)
+          WHALE   → 1.0s  (important)
+          UNKNOWN → 2.0s  (default)
+          SCALPER → 5.0s  (save rate limit)
+          NOISE   → 10.0s (low priority)
 
-        The poll loop supports burst mode: when WebSocket detects market
-        activity on a tracked asset, it triggers faster polling.
+        Each loop also supports burst mode: WS orderbook price-jump
+        triggers an immediate poll for that target's tracked markets.
         """
-        interval = self.config.monitoring.poll_interval
+        targets = self.config.get_active_targets()
+        if not targets:
+            logger.warning("No active targets configured")
+            return
+
+        # Build per-target poll intervals from profiler
+        target_intervals: dict[str, float] = {}
+        for t in targets:
+            if self.profiler:
+                prof = self.profiler._cache.get(t.address)
+                interval = prof.poll_interval if prof else 2.0
+            else:
+                interval = self.config.monitoring.poll_interval
+            target_intervals[t.address] = interval
+
         logger.info(
-            f"Trade monitor started: polling /trades every {interval}s for "
-            f"{len(self.config.get_active_targets())} targets"
+            f"Trade monitor started: adaptive polling for "
+            f"{len(targets)} targets | "
+            + ", ".join(
+                f"{t.nickname}={target_intervals[t.address]}s"
+                for t in targets
+            )
         )
+
+        # Launch independent per-target poll loops
+        loops = [
+            asyncio.create_task(
+                self._adaptive_poll_target(t, target_intervals[t.address]),
+                name=f"poll_{t.nickname}",
+            )
+            for t in targets
+        ]
+        await asyncio.gather(*loops)
+
+    async def _adaptive_poll_target(
+        self, target: TargetAccount, base_interval: float
+    ) -> None:
+        """Poll a single target at its adaptive interval.
+
+        Supports burst mode via self._burst_targets set.
+        """
+        poll_num = 0
         while True:
             try:
-                # Use burst interval if WebSocket flagged recent activity
-                current_interval = interval
+                # Burst: WS price-jump flagged this target for immediate poll
+                current_interval = base_interval
+                if target.address in self._burst_targets:
+                    current_interval = 0.3  # immediate burst
+                    self._burst_targets.discard(target.address)
+
+                # Also burst if global WS activity flag is set
                 if self._ws_activity_flag:
-                    current_interval = max(1, interval // 2)
+                    current_interval = min(current_interval, 0.5)
                     self._ws_activity_flag = False
 
-                new_count, latency = await self.monitor.poll_once()
+                new_count, latency = await self.monitor.poll_target_once(target)
+                poll_num += 1
 
-                # Sync to metrics
                 if self.metrics:
                     self.metrics.polls_completed = self.monitor._poll_count
                     self.metrics.record_api_latency(latency)
 
                 if new_count > 0:
                     logger.info(
-                        f"Poll #{self.monitor._poll_count}: "
+                        f"[{target.nickname}] Poll #{poll_num}: "
                         f"{new_count} new trades ({latency * 1000:.0f}ms)"
                     )
-                elif self.monitor._poll_count % 20 == 0:
-                    avg = (
-                        (self.monitor._total_poll_latency / self.monitor._poll_count * 1000)
-                        if self.monitor._poll_count
-                        else 0
-                    )
+                elif poll_num % 30 == 0:
                     logger.info(
-                        f"Poll #{self.monitor._poll_count}: "
-                        f"no new trades ({latency * 1000:.0f}ms, "
-                        f"avg={avg:.0f}ms)"
+                        f"[{target.nickname}] Poll #{poll_num}: "
+                        f"idle ({latency * 1000:.0f}ms, "
+                        f"interval={base_interval}s)"
                     )
             except Exception:
-                logger.exception("Unhandled error in poll cycle")
+                logger.exception(f"[{target.nickname}] Poll error")
                 if self.metrics:
                     self.metrics.increment_failed_requests()
             await asyncio.sleep(current_interval)
@@ -466,19 +528,39 @@ class Application:
             event_type = event.get("event_type", "")
 
             if event_type == "last_trade_price":
-                # A trade happened on this market – trigger faster polling
-                self._ws_activity_flag = True
-                asset_id = event.get("asset_id", "?")
+                # A trade happened on this market – trigger burst poll
+                asset_id = event.get("asset_id", "")
                 price = event.get("price", "?")
-                logger.debug(f"WS market activity: trade @ {price} (asset {str(asset_id)[:12]}...)")
+                # Burst-poll all targets tracking this asset
+                affected = self._asset_to_targets.get(asset_id, set())
+                if affected:
+                    self._burst_targets.update(affected)
+                    logger.debug(
+                        f"WS trade @ {price} → burst {len(affected)} targets "
+                        f"(asset {str(asset_id)[:12]}...)"
+                    )
+                else:
+                    self._ws_activity_flag = True
 
             elif event_type == "price_change":
-                # Cache price for slippage calculation
                 asset_id = event.get("asset_id", "")
                 price = event.get("price")
                 if asset_id and price:
                     p = float(price)
+                    old_p = self._price_cache.get(asset_id)
                     self._price_cache[asset_id] = p
+
+                    # Price-jump detection: >2% change → burst poll
+                    if old_p and old_p > 0:
+                        pct_change = abs(p - old_p) / old_p * 100
+                        if pct_change > 2.0:
+                            affected = self._asset_to_targets.get(asset_id, set())
+                            self._burst_targets.update(affected)
+                            logger.info(
+                                f"⚡ Price jump {pct_change:.1f}% on "
+                                f"{str(asset_id)[:12]}... → burst {len(affected)} targets"
+                            )
+
                     # Feed price to alert engine for momentum detection
                     if self.alert_engine:
                         self.alert_engine.update_price(asset_id, p)
@@ -494,6 +576,11 @@ class Application:
                 if asset_ids:
                     await ws.subscribe(asset_ids)
                     subscribed += len(asset_ids)
+                    # Build asset → target mapping for burst polling
+                    for aid in asset_ids:
+                        self._asset_to_targets.setdefault(aid, set()).add(
+                            target.address
+                        )
                     logger.info(
                         f"[{target.nickname}] WebSocket tracking {len(asset_ids)} "
                         f"active markets for price data"
