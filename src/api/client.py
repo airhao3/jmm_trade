@@ -246,6 +246,52 @@ class PolymarketClient:
             pass
         return await self._request("GET", url, params=params)
 
+    # ── Enrichment APIs ─────────────────────────────────
+
+    async def get_leaderboard_rank(self, user_address: str) -> dict | None:
+        """Fetch user's leaderboard profile (profit, rank, volume)."""
+        url = f"{self.config.base_urls['data']}/leaderboard"
+        data = await self._request("GET", url, params={"user": user_address})
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return None
+
+    async def get_profit_stats(self, user_address: str) -> dict:
+        """Fetch user's overall profit/volume stats from profile API."""
+        url = f"{self.config.base_urls['data']}/profile"
+        data = await self._request("GET", url, params={"user": user_address})
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    async def get_market_by_slug(self, slug: str) -> dict:
+        """GET /markets?slug= – full market details by slug."""
+        url = f"{self.config.base_urls['gamma']}/markets"
+        data = await self._request("GET", url, params={"slug": slug})
+        if isinstance(data, list) and data:
+            return data[0]
+        if isinstance(data, dict):
+            return data
+        return {}
+
+    async def get_user_market_positions(
+        self, user_address: str, condition_id: str
+    ) -> list[dict]:
+        """Get user's positions in a specific market."""
+        positions = await self.get_positions(user_address)
+        return [
+            p for p in positions
+            if p.get("conditionId") == condition_id or p.get("asset") == condition_id
+        ]
+
+    async def get_market_volume(
+        self, condition_id: str
+    ) -> dict:
+        """GET /markets?condition_id= – for volume & liquidity data."""
+        return await self.get_market(condition_id)
+
     # ── Forbidden operations ─────────────────────────────
 
     async def create_order(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG002

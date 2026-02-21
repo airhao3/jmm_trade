@@ -166,17 +166,44 @@ class NotificationManager:
     # ── Formatting ───────────────────────────────────────
 
     def _format_batch(self, events: list[dict[str, Any]]) -> str:
-        """Turn a batch of events into a human-readable message."""
+        """Turn a batch of events into a human-readable message.
+
+        If events contain '_rich_message' in their data, those pre-formatted
+        messages are used directly (from the TradeEnricher + RichFormatter).
+        """
+        # Check if any events have rich messages
+        rich_parts: list[str] = []
+        plain_events: list[dict[str, Any]] = []
+
+        for ev in events:
+            data = ev.get("data", {})
+            if "_rich_message" in data:
+                rich_parts.append(data["_rich_message"])
+            else:
+                plain_events.append(ev)
+
+        # If we have rich messages, join them with separators
+        if rich_parts:
+            result = "\n\n─────────────────\n\n".join(rich_parts)
+            # Append any plain events as a simple footer
+            if plain_events:
+                result += "\n\n" + self._format_plain_events(plain_events)
+            return result
+
+        # Fallback: all plain events
+        return self._format_plain_events(events) if events else ""
+
+    def _format_plain_events(self, events: list[dict[str, Any]]) -> str:
+        """Format plain (non-enriched) events."""
         lines = [f"=== Polymarket Copy Trader ({len(events)} events) ==="]
 
-        # Group by type
         by_type: dict[str, list[dict[str, Any]]] = {}
         for ev in events:
             by_type.setdefault(ev["event_type"], []).append(ev)
 
         for etype, evts in by_type.items():
             lines.append(f"\n[{etype}] x{len(evts)}")
-            for ev in evts[:5]:  # cap preview at 5
+            for ev in evts[:5]:
                 data = ev.get("data", {})
                 if etype == EventType.NEW_TRADE:
                     lines.append(

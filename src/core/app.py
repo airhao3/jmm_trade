@@ -13,6 +13,8 @@ from src.api.client import PolymarketClient
 from src.api.rate_limiter import TokenBucketRateLimiter
 from src.api.websocket import PolymarketWebSocket
 from src.config.models import AppConfig, TargetAccount
+from src.core.alerts import AlertEngine, format_arbitrage_alert, format_momentum_alert
+from src.core.enricher import TradeEnricher
 from src.core.monitor import TradeMonitor
 from src.core.portfolio import Portfolio
 from src.core.settlement import SettlementEngine
@@ -21,6 +23,7 @@ from src.data.database import Database
 from src.data.export import export_trades_to_csv
 from src.notifications.imessage import IMessageNotifier
 from src.notifications.manager import EventType, NotificationManager
+from src.notifications.rich_formatter import format_rich_trade_alert, format_sim_result
 from src.notifications.telegram import TelegramNotifier
 from src.notifications.telegram_bot import TelegramBotHandler
 from src.utils.latency import LatencyChecker
@@ -47,6 +50,10 @@ class Application:
         # WebSocket supplementary state
         self._ws_activity_flag: bool = False
         self._price_cache: dict[str, float] = {}
+
+        # Trade enricher & alert engine (initialised in run())
+        self.enricher: TradeEnricher | None = None
+        self.alert_engine: AlertEngine | None = None
 
     # ── Safety ───────────────────────────────────────────
 
@@ -103,6 +110,12 @@ class Application:
             self.simulator = TradeSimulator(self.config, api, self.db)
             self.settlement = SettlementEngine(self.config, api, self.db)
             self.portfolio = Portfolio(self.db)
+            self.enricher = TradeEnricher(api)
+
+            # ── Alert engine ──────────────────────────────
+            self.alert_engine = AlertEngine(api)
+            self.alert_engine.on_arbitrage(self._on_arbitrage)
+            self.alert_engine.on_momentum(self._on_momentum)
 
             # ── Notifications ────────────────────────────
             self.notifier = NotificationManager(self.config.notifications, self.db)
@@ -129,6 +142,9 @@ class Application:
             # WebSocket: also run for real-time market data
             if self.config.monitoring.mode.value == "websocket":
                 tasks.append(asyncio.create_task(self._run_websocket(), name="ws_loop"))
+
+            # Alert engine (arbitrage + momentum)
+            tasks.append(asyncio.create_task(self.alert_engine.run(), name="alert_engine"))
 
             # Settlement
             tasks.append(
@@ -173,20 +189,44 @@ class Application:
     # ── Callbacks ────────────────────────────────────────
 
     async def _on_new_trade(self, target: TargetAccount, trade: dict[str, Any]) -> None:
-        """Called by the monitor when a qualifying trade is found."""
-        # Notify: new trade detected
-        if self.notifier:
-            await self.notifier.notify(
-                EventType.NEW_TRADE,
-                {
-                    "nickname": target.nickname,
-                    "side": trade.get("side"),
-                    "title": trade.get("title"),
-                    "price": trade.get("price"),
-                },
-            )
+        """Called by the monitor when a qualifying trade is found.
 
-        # Run simulation
+        Enriches the trade with whale profile, orderbook, position context,
+        and external price data, then sends a rich multi-layer notification.
+        """
+        # ── Enrich trade data ──────────────────────────────
+        enriched = None
+        if self.enricher:
+            try:
+                enriched = await self.enricher.enrich(target, trade)
+                logger.info(
+                    f"[{target.nickname}] Trade enriched in "
+                    f"{enriched.enrichment_latency_ms:.0f}ms "
+                    f"(errors: {len(enriched.enrichment_errors)})"
+                )
+            except Exception:
+                logger.exception("Trade enrichment failed, using basic notification")
+
+        # ── Send rich notification ─────────────────────────
+        if self.notifier:
+            if enriched:
+                rich_msg = format_rich_trade_alert(enriched)
+                await self.notifier.notify(
+                    EventType.NEW_TRADE,
+                    {"_rich_message": rich_msg},
+                )
+            else:
+                await self.notifier.notify(
+                    EventType.NEW_TRADE,
+                    {
+                        "nickname": target.nickname,
+                        "side": trade.get("side"),
+                        "title": trade.get("title"),
+                        "price": trade.get("price"),
+                    },
+                )
+
+        # ── Run simulation ─────────────────────────────────
         results = await self.simulator.simulate(target, trade)
 
         if self.metrics:
@@ -197,25 +237,66 @@ class Application:
                 if self.metrics and sim.slippage_pct is not None:
                     self.metrics.record_slippage(sim.slippage_pct)
                 if self.notifier:
-                    await self.notifier.notify(
-                        EventType.SIM_EXECUTED,
-                        {
-                            "delay": sim.sim_delay,
-                            "sim_price": sim.sim_price,
-                            "slippage": round(sim.slippage_pct or 0, 2),
-                            "market": sim.market_name,
-                        },
-                    )
+                    if enriched:
+                        sim_msg = format_sim_result(
+                            enriched,
+                            sim.sim_delay,
+                            sim.sim_price,
+                            sim.slippage_pct,
+                            sim.sim_success,
+                        )
+                        await self.notifier.notify(
+                            EventType.SIM_EXECUTED,
+                            {"_rich_message": sim_msg},
+                        )
+                    else:
+                        await self.notifier.notify(
+                            EventType.SIM_EXECUTED,
+                            {
+                                "delay": sim.sim_delay,
+                                "sim_price": sim.sim_price,
+                                "slippage": round(sim.slippage_pct or 0, 2),
+                                "market": sim.market_name,
+                            },
+                        )
             else:
                 if self.notifier:
-                    await self.notifier.notify(
-                        EventType.SIM_FAILED,
-                        {
-                            "delay": sim.sim_delay,
-                            "reason": sim.sim_failure_reason,
-                            "market": sim.market_name,
-                        },
-                    )
+                    if enriched:
+                        sim_msg = format_sim_result(
+                            enriched,
+                            sim.sim_delay,
+                            sim.sim_price,
+                            sim.slippage_pct,
+                            sim.sim_success,
+                            sim.sim_failure_reason,
+                        )
+                        await self.notifier.notify(
+                            EventType.SIM_FAILED,
+                            {"_rich_message": sim_msg},
+                        )
+                    else:
+                        await self.notifier.notify(
+                            EventType.SIM_FAILED,
+                            {
+                                "delay": sim.sim_delay,
+                                "reason": sim.sim_failure_reason,
+                                "market": sim.market_name,
+                            },
+                        )
+
+    # ── Alert callbacks ─────────────────────────────────
+
+    async def _on_arbitrage(self, arb: Any) -> None:
+        """Called by AlertEngine when an arbitrage opportunity is found."""
+        if self.notifier:
+            msg = format_arbitrage_alert(arb)
+            await self.notifier.notify(EventType.NEW_TRADE, {"_rich_message": msg})
+
+    async def _on_momentum(self, shift: Any) -> None:
+        """Called by AlertEngine when a momentum shift is detected."""
+        if self.notifier:
+            msg = format_momentum_alert(shift)
+            await self.notifier.notify(EventType.NEW_TRADE, {"_rich_message": msg})
 
     # ── Startup check ────────────────────────────────────
 
@@ -355,7 +436,11 @@ class Application:
                 asset_id = event.get("asset_id", "")
                 price = event.get("price")
                 if asset_id and price:
-                    self._price_cache[asset_id] = float(price)
+                    p = float(price)
+                    self._price_cache[asset_id] = p
+                    # Feed price to alert engine for momentum detection
+                    if self.alert_engine:
+                        self.alert_engine.update_price(asset_id, p)
 
         ws.on_message(_handle_ws_message)
 
@@ -372,6 +457,20 @@ class Application:
                         f"[{target.nickname}] WebSocket tracking {len(asset_ids)} "
                         f"active markets for price data"
                     )
+
+                # Register market pairs for arbitrage scanning
+                if self.alert_engine:
+                    seen_conditions = set()
+                    for t in trades:
+                        cid = t.get("conditionId", "")
+                        token = t.get("asset", "")
+                        title = t.get("title", "")
+                        if cid and token and cid not in seen_conditions:
+                            seen_conditions.add(cid)
+                            # Register as yes token; no token discovered later
+                            self.alert_engine.track_market(
+                                cid, token, "", title
+                            )
             except Exception as exc:
                 logger.warning(f"Failed to load markets for {target.nickname}: {exc}")
 
