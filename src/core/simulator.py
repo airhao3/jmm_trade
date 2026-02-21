@@ -1,10 +1,11 @@
 """Shadow execution engine – simulates copy-trades with configurable delay.
 
-Responsibilities:
+v2 — VWAP-based slippage against real orderbook depth:
     1. Wait N seconds after a target trade is detected.
-    2. Sample the orderbook (best ask / best bid) at that moment.
-    3. Compute slippage, fees, and cost.
-    4. Persist the simulated trade record.
+    2. Fetch the FULL orderbook (top-10 levels).
+    3. Walk the book to compute VWAP for the desired trade size.
+    4. Reject if slippage > 5% (configurable).
+    5. Persist the simulated trade record.
 
 This module is fully independent and can be unit-tested without a live API
 by injecting a mock PolymarketClient.
@@ -22,9 +23,17 @@ from src.config.models import AppConfig, TargetAccount
 from src.data.database import Database
 from src.data.models import SimTrade
 
+# Hard slippage ceiling regardless of config
+MAX_SLIPPAGE_HARD_LIMIT = 5.0  # percent
+
 
 class TradeSimulator:
-    """Simulates delayed order execution against the live orderbook."""
+    """Simulates delayed order execution against the live orderbook.
+
+    Uses VWAP (Volume-Weighted Average Price) across top-10 orderbook
+    levels instead of just the best bid/ask, producing realistic
+    slippage estimates.
+    """
 
     def __init__(
         self,
@@ -43,16 +52,12 @@ class TradeSimulator:
         target: TargetAccount,
         trade: dict[str, Any],
     ) -> list[SimTrade]:
-        """Run simulation for all configured delays and persist results.
-
-        Returns a list of SimTrade records (one per delay).
-        """
+        """Run simulation for all configured delays and persist results."""
         results: list[SimTrade] = []
 
         for delay in self.config.simulation.delays:
             trade_id = f"{trade.get('transactionHash', '')}_{delay}s"
 
-            # Skip duplicates
             if await self.db.trade_exists(trade_id):
                 logger.debug(f"Trade {trade_id} already exists, skipping")
                 continue
@@ -85,36 +90,49 @@ class TradeSimulator:
         trade: dict[str, Any],
         delay: int,
     ) -> SimTrade:
-        """Simulate a single trade at a given delay."""
-        # 1. Wait for the configured delay
+        """Simulate a single trade at a given delay using VWAP."""
         await asyncio.sleep(delay)
 
-        # 2. Fetch the orderbook snapshot
         token_id = trade.get("asset", "")
         orderbook = await self.api.get_orderbook(token_id)
-
-        # 3. Extract best price
         side = trade.get("side", "BUY")
-        sim_price = self._extract_best_price(orderbook, side)
         target_price = float(trade.get("price", 0))
+        target_size = float(trade.get("size", 0))
 
-        # 4. Slippage calculation
-        slippage_pct: float | None = None
-        if target_price > 0 and sim_price is not None:
-            slippage_pct = ((sim_price - target_price) / target_price) * 100
-
-        # 5. Cost calculation
+        # Use investment to determine how many shares we'd buy
         investment = self.config.simulation.investment_per_trade
         fee = round(investment * self.config.simulation.fee_rate, 4)
         total_cost = round(investment + fee, 4)
 
-        # 6. Slippage limit check
+        # Compute VWAP across the orderbook for our trade size
+        vwap_result = self._compute_vwap(orderbook, side, investment)
+        sim_price = vwap_result["vwap"]
+        fillable = vwap_result["fillable"]
+        levels_used = vwap_result["levels_used"]
+
+        # Slippage calculation
+        slippage_pct: float | None = None
+        if target_price > 0 and sim_price is not None:
+            slippage_pct = ((sim_price - target_price) / target_price) * 100
+
+        # Success / failure determination
         sim_success = True
         failure_reason: str | None = None
 
         if sim_price is None:
             sim_success = False
             failure_reason = "Empty orderbook – no price available"
+        elif not fillable:
+            sim_success = False
+            failure_reason = (
+                f"Insufficient liquidity: only {levels_used} levels available"
+            )
+        elif slippage_pct is not None and abs(slippage_pct) > MAX_SLIPPAGE_HARD_LIMIT:
+            sim_success = False
+            failure_reason = (
+                f"SLIPPAGE_TOO_HIGH: {slippage_pct:.2f}% exceeds "
+                f"hard limit {MAX_SLIPPAGE_HARD_LIMIT}%"
+            )
         elif (
             self.config.simulation.enable_slippage_check
             and slippage_pct is not None
@@ -123,7 +141,7 @@ class TradeSimulator:
             sim_success = False
             failure_reason = (
                 f"Slippage {slippage_pct:.2f}% exceeds "
-                f"limit {self.config.simulation.max_slippage_pct}%"
+                f"config limit {self.config.simulation.max_slippage_pct}%"
             )
 
         return SimTrade(
@@ -136,7 +154,7 @@ class TradeSimulator:
             event_slug=trade.get("eventSlug", ""),
             target_side=side,
             target_price=target_price,
-            target_size=float(trade.get("size", 0)),
+            target_size=target_size,
             target_timestamp=int(trade.get("timestamp", 0)),
             target_execution_time=int(trade.get("timestamp", 0)),
             sim_delay=delay,
@@ -151,30 +169,74 @@ class TradeSimulator:
             status="OPEN" if sim_success else "FAILED",
         )
 
-    def _extract_best_price(self, orderbook: dict[str, Any], side: str) -> float | None:
-        """Get the best executable price from the orderbook.
+    # ── VWAP computation ─────────────────────────────────
 
-        For a BUY copy-trade we need the best ask (lowest sell offer).
-        For a SELL copy-trade we need the best bid (highest buy offer).
+    @staticmethod
+    def _compute_vwap(
+        orderbook: dict[str, Any],
+        side: str,
+        usd_amount: float,
+    ) -> dict:
+        """Walk the orderbook to compute VWAP for a given USD amount.
+
+        For BUY: walk asks (ascending price). We spend $usd_amount buying shares.
+        For SELL: walk bids (descending price). We sell shares worth $usd_amount.
+
+        Returns dict with:
+          vwap: volume-weighted average price (or None if empty)
+          fillable: True if enough liquidity exists
+          levels_used: number of orderbook levels consumed
+          total_shares: total shares that would be acquired
         """
-        try:
-            if side == "BUY":
-                asks = orderbook.get("asks", [])
-                if asks:
-                    # asks is a list of {"price": "0.55", "size": "100"}
-                    if isinstance(asks[0], dict):
-                        return float(asks[0].get("price", 0))
-                    # or [[price, size], ...]
-                    return float(asks[0][0])
+        levels = orderbook.get("asks" if side == "BUY" else "bids", [])
+
+        if not levels:
+            return {"vwap": None, "fillable": False, "levels_used": 0, "total_shares": 0}
+
+        remaining_usd = usd_amount
+        total_cost = 0.0
+        total_shares = 0.0
+        levels_used = 0
+
+        for level in levels[:10]:  # Top 10 levels
+            try:
+                if isinstance(level, dict):
+                    price = float(level.get("price", 0))
+                    size = float(level.get("size", 0))
+                else:
+                    price = float(level[0])
+                    size = float(level[1])
+            except (IndexError, TypeError, ValueError):
+                continue
+
+            if price <= 0 or size <= 0:
+                continue
+
+            levels_used += 1
+            level_usd = price * size  # total USD available at this level
+
+            if level_usd >= remaining_usd:
+                # This level has enough liquidity to fill the rest
+                shares_needed = remaining_usd / price
+                total_cost += remaining_usd
+                total_shares += shares_needed
+                remaining_usd = 0
+                break
             else:
-                bids = orderbook.get("bids", [])
-                if bids:
-                    if isinstance(bids[0], dict):
-                        return float(bids[0].get("price", 0))
-                    return float(bids[0][0])
-        except (IndexError, KeyError, TypeError, ValueError) as exc:
-            logger.warning(f"Could not parse orderbook price: {exc}")
-        return None
+                # Consume entire level and continue
+                total_cost += level_usd
+                total_shares += size
+                remaining_usd -= level_usd
+
+        fillable = remaining_usd <= 0
+        vwap = (total_cost / total_shares) if total_shares > 0 else None
+
+        return {
+            "vwap": round(vwap, 6) if vwap else None,
+            "fillable": fillable,
+            "levels_used": levels_used,
+            "total_shares": round(total_shares, 2),
+        }
 
     def _build_failed(
         self,

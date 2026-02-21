@@ -110,7 +110,7 @@ class Application:
             self.simulator = TradeSimulator(self.config, api, self.db)
             self.settlement = SettlementEngine(self.config, api, self.db)
             self.portfolio = Portfolio(self.db)
-            self.enricher = TradeEnricher(api)
+            self.enricher = TradeEnricher(api, ws_price_cache=self._price_cache)
 
             # ── Alert engine ──────────────────────────────
             self.alert_engine = AlertEngine(api)
@@ -191,8 +191,9 @@ class Application:
     async def _on_new_trade(self, target: TargetAccount, trade: dict[str, Any]) -> None:
         """Called by the monitor when a qualifying trade is found.
 
-        Enriches the trade with whale profile, orderbook, position context,
-        and external price data, then sends a rich multi-layer notification.
+        Pipeline: enrich → pre-flight filter → notify → simulate.
+        Low-quality trades (small USD, resolved markets, high spread,
+        negative PnL whales) are logged and skipped.
         """
         # ── Enrich trade data ──────────────────────────────
         enriched = None
@@ -206,6 +207,21 @@ class Application:
                 )
             except Exception:
                 logger.exception("Trade enrichment failed, using basic notification")
+
+        # ── Pre-flight quality gate ────────────────────────
+        if self.enricher and enriched:
+            pf = self.enricher.pre_flight(
+                trade,
+                whale=enriched.whale,
+                orderbook=enriched.orderbook,
+                market=enriched.market,
+            )
+            if not pf.passed:
+                logger.info(
+                    f"[{target.nickname}] SKIPPED: {', '.join(pf.skip_reasons)} "
+                    f"| {trade.get('title', '?')[:40]}"
+                )
+                return  # do not notify or simulate
 
         # ── Send rich notification ─────────────────────────
         if self.notifier:
