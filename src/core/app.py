@@ -19,8 +19,10 @@ from src.core.enricher import TradeEnricher
 from src.core.monitor import TradeMonitor
 from src.core.portfolio import Portfolio
 from src.core.profiler import SmartMoneyProfiler
+from src.core.risk_manager import RiskManager, TradeSignal, format_risk_verdict
 from src.core.settlement import SettlementEngine
 from src.core.simulator import TradeSimulator
+from src.core.sizing import compute_position_size, format_sizing_summary
 from src.data.database import Database
 from src.data.export import export_trades_to_csv
 from src.notifications.imessage import IMessageNotifier
@@ -60,6 +62,7 @@ class Application:
         self.alert_engine: AlertEngine | None = None
         self.price_feed: PriceFeed | None = None
         self.profiler: SmartMoneyProfiler | None = None
+        self.risk_manager: RiskManager = RiskManager()
 
     # ── Safety ───────────────────────────────────────────
 
@@ -306,6 +309,73 @@ class Application:
                     },
                 )
 
+        # ── Risk assessment (cross-target conflicts) ────────
+        profile = self.profiler.get_cached(target.address) if self.profiler else None
+        risk_verdict = None
+        condition_id = trade.get("conditionId", "")
+        outcome = trade.get("outcome", "")
+        side = trade.get("side", "BUY")
+
+        if condition_id:
+            # Record this trade signal for other targets to see
+            await self.risk_manager.record_signal(TradeSignal(
+                address=target.address,
+                nickname=target.nickname,
+                condition_id=condition_id,
+                market_title=trade.get("title", ""),
+                side=side,
+                outcome=outcome,
+                price=float(trade.get("price", 0)),
+                usd_value=float(trade.get("price", 0)) * float(trade.get("size", 0)),
+                follow_score=profile.follow_score if profile else 5,
+                archetype=profile.archetype.value if profile else "UNKNOWN",
+                timestamp=time.monotonic(),
+            ))
+
+            # Assess risk against other active signals
+            risk_verdict = await self.risk_manager.assess_risk(
+                target_nickname=target.nickname,
+                target_score=profile.follow_score if profile else 5,
+                condition_id=condition_id,
+                side=side,
+                outcome=outcome,
+            )
+
+            if risk_verdict.reasons:
+                risk_msg = format_risk_verdict(risk_verdict)
+                logger.info(f"[{target.nickname}] {risk_msg}")
+                if self.notifier and risk_verdict.action != "PROCEED":
+                    await self.notifier.notify(
+                        EventType.NEW_TRADE,
+                        {"_rich_message": f"🛡️ {risk_msg}"},
+                    )
+
+            if risk_verdict.action == "SKIP":
+                logger.info(
+                    f"[{target.nickname}] Trade SKIPPED by risk manager: "
+                    f"{risk_verdict.reasons}"
+                )
+                return
+
+        # ── Dynamic position sizing ──────────────────────────
+        sizing = compute_position_size(
+            base_amount=self.config.simulation.investment_per_trade,
+            profile=profile,
+            trade=trade,
+            pre_flight_score=pf.score if pf else 0,
+        )
+
+        # Apply risk multiplier
+        if risk_verdict and risk_verdict.multiplier != 1.0:
+            sizing.investment = round(sizing.investment * risk_verdict.multiplier, 2)
+            sizing.reasons.append(
+                f"Risk adj x{risk_verdict.multiplier:.1f} ({risk_verdict.action})"
+            )
+
+        logger.info(
+            f"[{target.nickname}] {format_sizing_summary(sizing)}"
+        )
+
         # ── Run simulation (skip if toxic spread) ──────────
         if pf and pf.skip_simulation:
             logger.info(
@@ -313,7 +383,9 @@ class Application:
                 f"| {trade.get('title', '?')[:40]}"
             )
             return
-        results = await self.simulator.simulate(target, trade)
+        results = await self.simulator.simulate(
+            target, trade, investment_override=sizing.investment
+        )
 
         if self.metrics:
             self.metrics.total_trades += len(results)

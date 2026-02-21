@@ -105,6 +105,10 @@ class SmartMoneyProfiler:
         self._cache[target.address] = profile
         return profile
 
+    def get_cached(self, address: str) -> BehaviorProfile | None:
+        """Return cached profile without API call (None if not cached)."""
+        return self._cache.get(address)
+
     def _analyze(
         self, target: TargetAccount, trades: list[dict[str, Any]]
     ) -> BehaviorProfile:

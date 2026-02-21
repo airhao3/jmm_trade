@@ -29,18 +29,32 @@
       "notes": "Alpha discovery: $15.9K profit, entry@$0.12, score=7/10, WR=100%"
     },
     {
-      "address": "0x204f72f35326db932158cba6adff0b9a1da95e14",
-      "nickname": "Alpha_5_HUNTER",
-      "enabled": true,
-      "added_at": "2026-02-22T05:44:00Z",
-      "notes": "Alpha discovery: $15.3K profit, entry@$0.26, score=8/10, accum=0.46"
-    },
-    {
       "address": "0x88f46b9e5d86b4fb85be55ab0ec4004264b9d4db",
       "nickname": "PBot1_REF",
       "enabled": true,
       "added_at": "2026-02-22T03:47:00Z",
       "notes": "NEGATIVE REFERENCE: NOISE score=0/10, WR=38%, wash=0.33. Keep for baseline comparison."
+    },
+    {
+      "address": "0x0e00ce71d933fd3ad48928911ef95c7327c8d1ff",
+      "nickname": "Alpha_SNIPER_2",
+      "enabled": true,
+      "added_at": "2026-02-21T21:57:43Z",
+      "notes": "Auto-discovered: profit=$54880.0, score=8/10, WR=86.8%"
+    },
+    {
+      "address": "0xcdb805bedd8f1f0403e6190bd3ad43d93027abbe",
+      "nickname": "Alpha_UNKNOWN_3",
+      "enabled": true,
+      "added_at": "2026-02-21T21:57:43Z",
+      "notes": "Auto-discovered: profit=$36747.93, score=8/10, WR=79.5%"
+    },
+    {
+      "address": "0x38f8d8ca806c65b27a1ccc500424ed712599f27b",
+      "nickname": "Alpha_UNKNOWN_6",
+      "enabled": true,
+      "added_at": "2026-02-21T21:57:43Z",
+      "notes": "Auto-discovered: profit=$25230.0, score=6/10, WR=68.4%"
     }
   ]
 }

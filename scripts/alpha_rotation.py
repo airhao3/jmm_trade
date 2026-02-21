@@ -31,6 +31,7 @@ from src.config.loader import load_config
 from src.core.profiler import Archetype, SmartMoneyProfiler
 
 TARGETS_PATH = Path("config/targets.json")
+CANDIDATES_PATH = Path("config/candidates.json")
 ROTATION_LOG = Path("logs/alpha_rotation.log")
 
 
@@ -148,25 +149,45 @@ async def rotate(
     # Cap evictions
     evict = evict[:max_evict]
 
-    # Step 2: Discover new alphas if we have room
+    # Step 2: Try shadow pool first, then discover new alphas
     slots_available = max_targets - len(keep)
     new_alphas: list[dict] = []
+    tracked_addrs = {t["address"].lower() for t in keep}
 
     if slots_available > 0:
-        logger.info(f"\n🔍 Discovering alpha addresses ({slots_available} slots)...")
-        candidates = await discover_alpha(api, profiler, top_n=slots_available + 5)
-
-        # Filter: only promote if score >= min_score and not already tracked
-        tracked_addrs = {t["address"].lower() for t in keep}
-        for c in candidates:
+        # 2a. Promote from shadow pool (proven candidates first)
+        shadow = _load_candidates()
+        shadow_promoted = []
+        for s in sorted(shadow, key=lambda x: -x.get("shadow_score", 0)):
             if len(new_alphas) >= slots_available:
                 break
-            if c["address"].lower() in tracked_addrs:
+            if s["address"].lower() in tracked_addrs:
                 continue
-            if c.get("follow_score", 0) >= min_score:
-                new_alphas.append(c)
+            if s.get("shadow_score", 0) >= min_score:
+                new_alphas.append(s)
+                shadow_promoted.append(s["address"])
+                tracked_addrs.add(s["address"].lower())
+
+        if shadow_promoted:
+            logger.info(
+                f"\n\u2b06\ufe0f Promoted {len(shadow_promoted)} from shadow pool"
+            )
+
+        # 2b. Discover fresh alphas for remaining slots
+        remaining = slots_available - len(new_alphas)
+        if remaining > 0:
+            logger.info(f"\n\U0001f50d Discovering alpha addresses ({remaining} slots)...")
+            candidates = await discover_alpha(api, profiler, top_n=remaining + 5)
+            for c in candidates:
+                if len(new_alphas) >= slots_available:
+                    break
+                if c["address"].lower() in tracked_addrs:
+                    continue
+                if c.get("follow_score", 0) >= min_score:
+                    new_alphas.append(c)
+                    tracked_addrs.add(c["address"].lower())
     else:
-        logger.info(f"\n📋 No slots available ({len(keep)} targets kept, max={max_targets})")
+        logger.info(f"\n\U0001f4cb No slots available ({len(keep)} targets kept, max={max_targets})")
 
     # Step 3: Build new targets list
     new_targets = list(keep)
@@ -201,12 +222,40 @@ async def rotate(
     logger.info(f"  Promoted: {summary['promoted']} {summary['promoted_addresses']}")
     logger.info(f"  Total:    {summary['total']}")
 
-    # Step 4: Write targets.json (unless dry-run)
+    # Step 4: Update shadow pool
+    # - Evicted targets go to shadow for monitoring
+    # - Promoted shadows are removed from candidates
+    # - New discovery results go to shadow if not promoted
+    shadow = _load_candidates()
+    shadow_addrs = {s["address"].lower() for s in shadow}
+
+    # Add evicted to shadow (demote, not delete)
+    for e in evict:
+        if e["address"].lower() not in shadow_addrs:
+            shadow.append({
+                "address": e["address"],
+                "nickname": e.get("nickname", ""),
+                "shadow_score": 0,
+                "added_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                "notes": f"Demoted: {e.get('_evict_reasons', [])}",
+            })
+
+    # Remove promoted from shadow
+    promoted_addrs = {a["address"].lower() for a in new_alphas}
+    shadow = [s for s in shadow if s["address"].lower() not in promoted_addrs]
+
+    # Step 5: Write files (unless dry-run)
     if dry_run:
-        logger.info("\n⚠️ DRY RUN — no changes written to targets.json")
+        logger.info("\n\u26a0\ufe0f DRY RUN \u2014 no changes written")
     else:
         _save_targets(new_targets)
-        logger.info(f"\n✅ targets.json updated with {len(new_targets)} targets")
+        _save_candidates(shadow)
+        logger.info(
+            f"\n\u2705 targets.json: {len(new_targets)} targets, "
+            f"candidates.json: {len(shadow)} in shadow pool"
+        )
+
+    summary["shadow_pool_size"] = len(shadow)
 
     # Log rotation
     _log_rotation(summary)
@@ -235,6 +284,22 @@ def _save_targets(targets: list[dict]) -> None:
     TARGETS_PATH.parent.mkdir(parents=True, exist_ok=True)
     with open(TARGETS_PATH, "w", encoding="utf-8") as f:
         json.dump({"targets": clean}, f, indent=2, ensure_ascii=False)
+        f.write("\n")
+
+
+def _load_candidates() -> list[dict]:
+    if not CANDIDATES_PATH.exists():
+        return []
+    with open(CANDIDATES_PATH, encoding="utf-8") as f:
+        data = json.load(f)
+    return data.get("candidates", [])
+
+
+def _save_candidates(candidates: list[dict]) -> None:
+    clean = [{k: v for k, v in c.items() if not k.startswith("_")} for c in candidates]
+    CANDIDATES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(CANDIDATES_PATH, "w", encoding="utf-8") as f:
+        json.dump({"candidates": clean}, f, indent=2, ensure_ascii=False)
         f.write("\n")
 
 

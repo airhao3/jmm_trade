@@ -51,6 +51,7 @@ class TradeSimulator:
         self,
         target: TargetAccount,
         trade: dict[str, Any],
+        investment_override: float | None = None,
     ) -> list[SimTrade]:
         """Run simulation for all configured delays and persist results."""
         results: list[SimTrade] = []
@@ -63,7 +64,9 @@ class TradeSimulator:
                 continue
 
             try:
-                sim = await self._simulate_single(target, trade, delay)
+                sim = await self._simulate_single(
+                    target, trade, delay, investment_override
+                )
                 await self.db.insert_sim_trade(sim)
                 results.append(sim)
 
@@ -89,6 +92,7 @@ class TradeSimulator:
         target: TargetAccount,
         trade: dict[str, Any],
         delay: int,
+        investment_override: float | None = None,
     ) -> SimTrade:
         """Simulate a single trade at a given delay using VWAP."""
         await asyncio.sleep(delay)
@@ -99,8 +103,8 @@ class TradeSimulator:
         target_price = float(trade.get("price", 0))
         target_size = float(trade.get("size", 0))
 
-        # Use investment to determine how many shares we'd buy
-        investment = self.config.simulation.investment_per_trade
+        # Dynamic sizing: use override if provided, else config base
+        investment = investment_override or self.config.simulation.investment_per_trade
         fee = round(investment * self.config.simulation.fee_rate, 4)
         total_cost = round(investment + fee, 4)
 
