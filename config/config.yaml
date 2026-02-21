@@ -162,7 +162,7 @@ logging:
     errors:
       enabled: true
       path: "logs/errors.log"
-      level: "WARN"
+      level: "WARNING"
       format: "detailed"
       rotation: "50 MB"
       retention: "90 days"

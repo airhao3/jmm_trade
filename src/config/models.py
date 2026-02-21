@@ -208,7 +208,7 @@ class FilesConfig(BaseModel):
     main: FileLogConfig = Field(default_factory=lambda: FileLogConfig(path="logs/bot.log"))
     trades: FileLogConfig = Field(default_factory=lambda: FileLogConfig(path="logs/trades.log", format="table", retention="90 days"))
     metrics: MetricsFileConfig = Field(default_factory=MetricsFileConfig)
-    errors: FileLogConfig = Field(default_factory=lambda: FileLogConfig(path="logs/errors.log", level="WARN", format="detailed", retention="90 days"))
+    errors: FileLogConfig = Field(default_factory=lambda: FileLogConfig(path="logs/errors.log", level="WARNING", format="detailed", retention="90 days"))
 
 
 class LoggingConfig(BaseModel):
