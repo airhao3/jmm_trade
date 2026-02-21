@@ -10,15 +10,15 @@ from __future__ import annotations
 import asyncio
 from abc import ABC, abstractmethod
 from datetime import datetime
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from loguru import logger
 
 from src.config.models import NotificationsConfig
 from src.data.database import Database
 
-
 # ── Event types ──────────────────────────────────────────
+
 
 class EventType:
     NEW_TRADE = "NEW_TRADE_DETECTED"
@@ -30,6 +30,7 @@ class EventType:
 
 
 # ── Base channel ─────────────────────────────────────────
+
 
 class NotificationChannel(ABC):
     """Abstract notification channel."""
@@ -44,18 +45,19 @@ class NotificationChannel(ABC):
 
 # ── Manager ──────────────────────────────────────────────
 
+
 class NotificationManager:
     """Aggregates events and dispatches through registered channels."""
 
     def __init__(
         self,
         config: NotificationsConfig,
-        db: Optional[Database] = None,
+        db: Database | None = None,
     ) -> None:
         self.config = config
         self.db = db
-        self._channels: List[NotificationChannel] = []
-        self._queue: asyncio.Queue[Dict[str, Any]] = asyncio.Queue()
+        self._channels: list[NotificationChannel] = []
+        self._queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._running = False
 
     # ── Channel registration ─────────────────────────────
@@ -66,15 +68,17 @@ class NotificationManager:
 
     # ── Enqueue ──────────────────────────────────────────
 
-    async def notify(self, event_type: str, data: Dict[str, Any]) -> None:
+    async def notify(self, event_type: str, data: dict[str, Any]) -> None:
         """Enqueue an event for batched delivery."""
         if not self.config.enabled:
             return
-        await self._queue.put({
-            "event_type": event_type,
-            "data": data,
-            "timestamp": datetime.utcnow().isoformat(),
-        })
+        await self._queue.put(
+            {
+                "event_type": event_type,
+                "data": data,
+                "timestamp": datetime.utcnow().isoformat(),
+            }
+        )
 
     # ── Aggregation loop ─────────────────────────────────
 
@@ -84,8 +88,7 @@ class NotificationManager:
         self._running = True
         interval = self.config.aggregation_interval
         logger.info(
-            f"Notification manager started (interval={interval}s, "
-            f"channels={len(self._channels)})"
+            f"Notification manager started (interval={interval}s, channels={len(self._channels)})"
         )
 
         while self._running:
@@ -98,7 +101,7 @@ class NotificationManager:
 
     async def _flush(self) -> None:
         """Drain the queue and send aggregated message."""
-        events: List[Dict[str, Any]] = []
+        events: list[dict[str, Any]] = []
         while not self._queue.empty():
             try:
                 events.append(self._queue.get_nowait())
@@ -118,11 +121,11 @@ class NotificationManager:
         self,
         channel: NotificationChannel,
         message: str,
-        events: List[Dict[str, Any]],
+        events: list[dict[str, Any]],
     ) -> None:
         backoff = self.config.retry_backoff
         attempts = self.config.max_retries + 1
-        last_error: Optional[str] = None
+        last_error: str | None = None
 
         for attempt in range(attempts):
             try:
@@ -140,9 +143,7 @@ class NotificationManager:
                     return
             except Exception as exc:
                 last_error = str(exc)
-                logger.warning(
-                    f"[{channel.name}] send failed (attempt {attempt + 1}): {exc}"
-                )
+                logger.warning(f"[{channel.name}] send failed (attempt {attempt + 1}): {exc}")
 
             if attempt < len(backoff):
                 await asyncio.sleep(backoff[attempt])
@@ -164,12 +165,12 @@ class NotificationManager:
 
     # ── Formatting ───────────────────────────────────────
 
-    def _format_batch(self, events: List[Dict[str, Any]]) -> str:
+    def _format_batch(self, events: list[dict[str, Any]]) -> str:
         """Turn a batch of events into a human-readable message."""
         lines = [f"=== Polymarket Copy Trader ({len(events)} events) ==="]
 
         # Group by type
-        by_type: Dict[str, List[Dict[str, Any]]] = {}
+        by_type: dict[str, list[dict[str, Any]]] = {}
         for ev in events:
             by_type.setdefault(ev["event_type"], []).append(ev)
 
@@ -190,10 +191,7 @@ class NotificationManager:
                         f"slip={data.get('slippage', '?')}%"
                     )
                 elif etype == EventType.MARKET_SETTLED:
-                    lines.append(
-                        f"  {data.get('market', '?')} -> "
-                        f"PnL ${data.get('pnl', '?')}"
-                    )
+                    lines.append(f"  {data.get('market', '?')} -> PnL ${data.get('pnl', '?')}")
                 else:
                     lines.append(f"  {data}")
 

@@ -3,12 +3,10 @@
 from __future__ import annotations
 
 from copy import deepcopy
-from unittest.mock import AsyncMock
 
 import pytest
 
 from src.core.simulator import TradeSimulator
-from src.data.models import SimTrade
 
 
 @pytest.mark.integration
@@ -39,7 +37,9 @@ async def test_sell_uses_best_bid(sample_config, mock_api_client, db, sample_tra
 
 @pytest.mark.unit
 @pytest.mark.asyncio
-async def test_slippage_calculation(sample_config, mock_api_client, db, sample_trade, sample_target):
+async def test_slippage_calculation(
+    sample_config, mock_api_client, db, sample_trade, sample_target
+):
     """Slippage = (sim_price - target_price) / target_price * 100."""
     simulator = TradeSimulator(sample_config, mock_api_client, db)
     results = await simulator.simulate(sample_target, sample_trade)
@@ -71,7 +71,9 @@ async def test_total_cost(sample_config, mock_api_client, db, sample_trade, samp
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_empty_orderbook_marks_failed(sample_config, mock_api_client, db, sample_trade, sample_target):
+async def test_empty_orderbook_marks_failed(
+    sample_config, mock_api_client, db, sample_trade, sample_target
+):
     """Empty orderbook should produce a FAILED sim trade."""
     mock_api_client.get_orderbook.return_value = {"asks": [], "bids": []}
 
@@ -86,7 +88,9 @@ async def test_empty_orderbook_marks_failed(sample_config, mock_api_client, db, 
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_slippage_exceeds_limit(sample_config, mock_api_client, db, sample_trade, sample_target):
+async def test_slippage_exceeds_limit(
+    sample_config, mock_api_client, db, sample_trade, sample_target
+):
     """Slippage exceeding max_slippage_pct should mark trade as FAILED."""
     # Set best ask very high to exceed 5% slippage
     mock_api_client.get_orderbook.return_value = {
@@ -104,7 +108,9 @@ async def test_slippage_exceeds_limit(sample_config, mock_api_client, db, sample
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_multiple_delays_produce_two_records(sample_config, mock_api_client, db, sample_trade, sample_target):
+async def test_multiple_delays_produce_two_records(
+    sample_config, mock_api_client, db, sample_trade, sample_target
+):
     """Config delays [1, 3] should produce exactly 2 SimTrade records."""
     simulator = TradeSimulator(sample_config, mock_api_client, db)
     results = await simulator.simulate(sample_target, sample_trade)
@@ -130,7 +136,9 @@ async def test_deduplication(sample_config, mock_api_client, db, sample_trade, s
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_api_error_produces_failed_record(sample_config, mock_api_client, db, sample_trade, sample_target):
+async def test_api_error_produces_failed_record(
+    sample_config, mock_api_client, db, sample_trade, sample_target
+):
     """API exception during orderbook fetch should produce FAILED record."""
     mock_api_client.get_orderbook.side_effect = ConnectionError("API down")
 

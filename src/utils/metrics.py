@@ -6,7 +6,6 @@ import asyncio
 import json
 import time
 from collections import deque
-from typing import Deque, Dict, Optional
 
 from loguru import logger
 
@@ -24,16 +23,16 @@ class MetricsCollector:
     def __init__(
         self,
         config: LoggingConfig,
-        db: Optional[Database] = None,
+        db: Database | None = None,
     ) -> None:
         self.config = config
         self.db = db
 
         # Ring buffers for recent values
-        self._api_latency: Deque[float] = deque(maxlen=1000)
-        self._slippage: Deque[float] = deque(maxlen=1000)
-        self._pnl: Deque[float] = deque(maxlen=1000)
-        self._notif_success: Deque[int] = deque(maxlen=200)
+        self._api_latency: deque[float] = deque(maxlen=1000)
+        self._slippage: deque[float] = deque(maxlen=1000)
+        self._pnl: deque[float] = deque(maxlen=1000)
+        self._notif_success: deque[int] = deque(maxlen=200)
 
         # Simple counters
         self.active_accounts: int = 0
@@ -78,9 +77,7 @@ class MetricsCollector:
             "avg_api_latency_ms": round(self._avg(self._api_latency) * 1000, 1),
             "avg_slippage_pct": round(self._avg(self._slippage), 3),
             "recent_pnl_sum": round(sum(self._pnl), 2),
-            "notification_success_rate": round(
-                self._avg(self._notif_success) * 100, 1
-            ),
+            "notification_success_rate": round(self._avg(self._notif_success) * 100, 1),
         }
 
         # Emit to metrics log via loguru
@@ -89,14 +86,12 @@ class MetricsCollector:
         # Persist to DB
         if self.db:
             try:
-                await self.db.insert_metric(
-                    "system_snapshot", 0, snapshot
-                )
+                await self.db.insert_metric("system_snapshot", 0, snapshot)
             except Exception:
                 logger.debug("Failed to persist metrics snapshot")
 
     # ── Helpers ───────────────────────────────────────────
 
     @staticmethod
-    def _avg(buf: Deque[float]) -> float:
+    def _avg(buf: deque[float]) -> float:
         return sum(buf) / len(buf) if buf else 0.0

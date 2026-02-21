@@ -25,6 +25,7 @@ def cli(ctx: click.Context, config_path: str) -> None:
 
 # ── run ──────────────────────────────────────────────────
 
+
 @cli.command()
 @click.option(
     "--mode",
@@ -71,6 +72,7 @@ def run(ctx: click.Context, mode: str | None, dry_run: bool) -> None:
 
 # ── export ───────────────────────────────────────────────
 
+
 @cli.command()
 @click.option(
     "--output",
@@ -99,9 +101,7 @@ def export(ctx: click.Context, output: str | None) -> None:
                 click.echo("No trades to export.")
                 return
 
-            path = await export_trades_to_csv(
-                all_trades, config.export, filename=output
-            )
+            path = await export_trades_to_csv(all_trades, config.export, filename=output)
             click.echo(f"Exported {len(all_trades)} trades -> {path}")
         finally:
             await db.close()
@@ -110,6 +110,7 @@ def export(ctx: click.Context, output: str | None) -> None:
 
 
 # ── stats ────────────────────────────────────────────────
+
 
 @cli.command()
 @click.option(
@@ -138,7 +139,8 @@ def stats(ctx: click.Context, target: str | None) -> None:
             s = acct_stats
             success_rate = (
                 (s.total_trades - s.failed_trades) / s.total_trades * 100
-                if s.total_trades > 0 else 0
+                if s.total_trades > 0
+                else 0
             )
 
             click.echo("")
@@ -182,6 +184,7 @@ def stats(ctx: click.Context, target: str | None) -> None:
 
 # ── check-config ─────────────────────────────────────────
 
+
 @cli.command("check-config")
 @click.pass_context
 def check_config(ctx: click.Context) -> None:
@@ -203,4 +206,4 @@ def check_config(ctx: click.Context) -> None:
 
     except Exception as exc:
         click.echo(f"Config validation FAILED: {exc}", err=True)
-        raise SystemExit(1)
+        raise SystemExit(1) from exc

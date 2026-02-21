@@ -30,7 +30,7 @@ def load_config(config_path: str = "config/config.yaml") -> AppConfig:
     if not config_file.exists():
         raise FileNotFoundError(f"Config file not found: {config_file.resolve()}")
 
-    with open(config_file, "r", encoding="utf-8") as f:
+    with open(config_file, encoding="utf-8") as f:
         raw = yaml.safe_load(f)
 
     if raw is None:

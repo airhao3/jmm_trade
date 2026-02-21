@@ -2,10 +2,8 @@
 
 from __future__ import annotations
 
-import asyncio
 import os
-from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 from unittest.mock import AsyncMock
 
 import pytest
@@ -17,8 +15,9 @@ os.environ["FORCE_READ_ONLY"] = "true"
 
 # ── Config fixtures ──────────────────────────────────────
 
+
 @pytest.fixture
-def raw_config_dict() -> Dict[str, Any]:
+def raw_config_dict() -> dict[str, Any]:
     """Minimal valid config dict for constructing AppConfig."""
     return {
         "system": {"read_only_mode": True, "force_read_only": True},
@@ -92,8 +91,9 @@ def sample_target():
 
 # ── API mock fixtures ────────────────────────────────────
 
+
 @pytest.fixture
-def sample_trade() -> Dict[str, Any]:
+def sample_trade() -> dict[str, Any]:
     """A realistic Polymarket trade response dict."""
     return {
         "proxyWallet": "0x88f46b9e5d86b4fb85be55ab0ec4004264b9d4db",
@@ -113,7 +113,7 @@ def sample_trade() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def sample_trade_filtered() -> Dict[str, Any]:
+def sample_trade_filtered() -> dict[str, Any]:
     """A trade that should NOT pass market filter (monthly market)."""
     return {
         "proxyWallet": "0x88f46b9e5d86b4fb85be55ab0ec4004264b9d4db",
@@ -133,7 +133,7 @@ def sample_trade_filtered() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def sample_orderbook() -> Dict[str, Any]:
+def sample_orderbook() -> dict[str, Any]:
     """A realistic orderbook response."""
     return {
         "asks": [
@@ -150,7 +150,7 @@ def sample_orderbook() -> Dict[str, Any]:
 
 
 @pytest.fixture
-def empty_orderbook() -> Dict[str, Any]:
+def empty_orderbook() -> dict[str, Any]:
     """An empty orderbook."""
     return {"asks": [], "bids": []}
 
@@ -178,6 +178,7 @@ def mock_api_client(sample_orderbook) -> AsyncMock:
 
 # ── Database fixtures ────────────────────────────────────
 
+
 @pytest_asyncio.fixture
 async def db(tmp_path):
     """Temporary SQLite database for testing."""
@@ -193,6 +194,7 @@ async def db(tmp_path):
 
 
 # ── SimTrade fixture ─────────────────────────────────────
+
 
 @pytest.fixture
 def sample_sim_trade():

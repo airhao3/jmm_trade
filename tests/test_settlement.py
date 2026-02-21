@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from copy import deepcopy
-
 import pytest
 
 from src.core.settlement import SettlementEngine
@@ -151,9 +149,7 @@ async def test_settle_once_market_not_resolved(
 
 @pytest.mark.integration
 @pytest.mark.asyncio
-async def test_settle_once_resolved_market(
-    sample_config, mock_api_client, db, sample_sim_trade
-):
+async def test_settle_once_resolved_market(sample_config, mock_api_client, db, sample_sim_trade):
     """Open trade with resolved market should be settled with PnL."""
     await db.insert_sim_trade(sample_sim_trade)
 

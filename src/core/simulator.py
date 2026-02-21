@@ -13,8 +13,7 @@ by injecting a mock PolymarketClient.
 from __future__ import annotations
 
 import asyncio
-import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -42,13 +41,13 @@ class TradeSimulator:
     async def simulate(
         self,
         target: TargetAccount,
-        trade: Dict[str, Any],
-    ) -> List[SimTrade]:
+        trade: dict[str, Any],
+    ) -> list[SimTrade]:
         """Run simulation for all configured delays and persist results.
 
         Returns a list of SimTrade records (one per delay).
         """
-        results: List[SimTrade] = []
+        results: list[SimTrade] = []
 
         for delay in self.config.simulation.delays:
             trade_id = f"{trade.get('transactionHash', '')}_{delay}s"
@@ -71,9 +70,7 @@ class TradeSimulator:
                     f"slip={sim.slippage_pct or 0:.2f}%"
                 )
             except Exception as exc:
-                logger.error(
-                    f"[{target.nickname}] Simulation error (delay={delay}s): {exc}"
-                )
+                logger.error(f"[{target.nickname}] Simulation error (delay={delay}s): {exc}")
                 failed = self._build_failed(target, trade, delay, str(exc))
                 await self.db.insert_sim_trade(failed)
                 results.append(failed)
@@ -85,7 +82,7 @@ class TradeSimulator:
     async def _simulate_single(
         self,
         target: TargetAccount,
-        trade: Dict[str, Any],
+        trade: dict[str, Any],
         delay: int,
     ) -> SimTrade:
         """Simulate a single trade at a given delay."""
@@ -102,7 +99,7 @@ class TradeSimulator:
         target_price = float(trade.get("price", 0))
 
         # 4. Slippage calculation
-        slippage_pct: Optional[float] = None
+        slippage_pct: float | None = None
         if target_price > 0 and sim_price is not None:
             slippage_pct = ((sim_price - target_price) / target_price) * 100
 
@@ -113,7 +110,7 @@ class TradeSimulator:
 
         # 6. Slippage limit check
         sim_success = True
-        failure_reason: Optional[str] = None
+        failure_reason: str | None = None
 
         if sim_price is None:
             sim_success = False
@@ -154,9 +151,7 @@ class TradeSimulator:
             status="OPEN" if sim_success else "FAILED",
         )
 
-    def _extract_best_price(
-        self, orderbook: Dict[str, Any], side: str
-    ) -> Optional[float]:
+    def _extract_best_price(self, orderbook: dict[str, Any], side: str) -> float | None:
         """Get the best executable price from the orderbook.
 
         For a BUY copy-trade we need the best ask (lowest sell offer).
@@ -184,7 +179,7 @@ class TradeSimulator:
     def _build_failed(
         self,
         target: TargetAccount,
-        trade: Dict[str, Any],
+        trade: dict[str, Any],
         delay: int,
         reason: str,
     ) -> SimTrade:

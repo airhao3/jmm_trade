@@ -13,17 +13,16 @@ from __future__ import annotations
 import asyncio
 import re
 import time
-from typing import Any, Callable, Coroutine, Dict, List, Optional, Set
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 from loguru import logger
 
 from src.api.client import PolymarketClient
-from src.config.models import AppConfig, MarketFilterConfig, TargetAccount
+from src.config.models import AppConfig, TargetAccount
 
 # Callback signature: (target_account, trade_dict) -> None
-TradeCallback = Callable[
-    [TargetAccount, Dict[str, Any]], Coroutine[Any, Any, None]
-]
+TradeCallback = Callable[[TargetAccount, dict[str, Any]], Coroutine[Any, Any, None]]
 
 
 class TradeMonitor:
@@ -38,20 +37,18 @@ class TradeMonitor:
         self.api = api_client
 
         # Track already-seen trade hashes per address
-        self._seen: Dict[str, Set[str]] = {}
+        self._seen: dict[str, set[str]] = {}
         # External callbacks
-        self._callbacks: List[TradeCallback] = []
+        self._callbacks: list[TradeCallback] = []
         # Poll statistics
         self._poll_count: int = 0
         self._total_poll_latency: float = 0.0
 
         # Precompile market filter regex
-        self._asset_pattern: Optional[re.Pattern] = None
+        self._asset_pattern: re.Pattern | None = None
         self._time_pattern = re.compile(r"\b(\d+)\s*[-–]?\s*(min|minute)", re.I)
         if config.market_filter.enabled:
-            asset_alts = "|".join(
-                re.escape(a) for a in config.market_filter.assets
-            )
+            asset_alts = "|".join(re.escape(a) for a in config.market_filter.assets)
             self._asset_pattern = re.compile(asset_alts, re.I)
 
     # ── Public API ───────────────────────────────────────
@@ -94,15 +91,18 @@ class TradeMonitor:
                 new_count, latency = await self.poll_once()
                 if new_count > 0:
                     logger.info(
-                        f"Poll #{self._poll_count}: {new_count} new trades "
-                        f"({latency*1000:.0f}ms)"
+                        f"Poll #{self._poll_count}: {new_count} new trades ({latency * 1000:.0f}ms)"
                     )
                 elif self._poll_count % 20 == 0:
                     # Log every 20th poll for heartbeat visibility
-                    avg = (self._total_poll_latency / self._poll_count * 1000) if self._poll_count else 0
+                    avg = (
+                        (self._total_poll_latency / self._poll_count * 1000)
+                        if self._poll_count
+                        else 0
+                    )
                     logger.info(
                         f"Poll #{self._poll_count}: no new trades "
-                        f"({latency*1000:.0f}ms, avg={avg:.0f}ms)"
+                        f"({latency * 1000:.0f}ms, avg={avg:.0f}ms)"
                     )
             except Exception:
                 logger.exception("Unhandled error in poll cycle")
@@ -116,12 +116,8 @@ class TradeMonitor:
 
         if target.address not in self._seen:
             # First poll: seed with existing trades, don't dispatch
-            self._seen[target.address] = {
-                t.get("transactionHash", "") for t in trades
-            }
-            logger.info(
-                f"[{target.nickname}] Seeded {len(trades)} existing trades"
-            )
+            self._seen[target.address] = {t.get("transactionHash", "") for t in trades}
+            logger.info(f"[{target.nickname}] Seeded {len(trades)} existing trades")
             return 0
 
         new_count = 0
@@ -133,9 +129,7 @@ class TradeMonitor:
             self._seen[target.address].add(tx_hash)
 
             if not self._passes_market_filter(trade):
-                logger.debug(
-                    f"[{target.nickname}] Filtered out: {trade.get('title', '?')}"
-                )
+                logger.debug(f"[{target.nickname}] Filtered out: {trade.get('title', '?')}")
                 continue
 
             logger.info(
@@ -154,7 +148,7 @@ class TradeMonitor:
 
         return new_count
 
-    def _passes_market_filter(self, trade: Dict[str, Any]) -> bool:
+    def _passes_market_filter(self, trade: dict[str, Any]) -> bool:
         """Return True if the trade's market matches configured filters."""
         filt = self.config.market_filter
         if not filt.enabled:

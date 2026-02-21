@@ -7,7 +7,7 @@ been resolved.  If so, calculates realised PnL and updates the records.
 from __future__ import annotations
 
 import asyncio
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from loguru import logger
 
@@ -39,7 +39,7 @@ class SettlementEngine:
             return 0
 
         # Group by condition_id to minimise API calls
-        by_market: Dict[str, List[Dict[str, Any]]] = {}
+        by_market: dict[str, list[dict[str, Any]]] = {}
         for t in open_trades:
             cid = t.get("condition_id", "")
             by_market.setdefault(cid, []).append(t)
@@ -87,9 +87,7 @@ class SettlementEngine:
 
     # ── Private ──────────────────────────────────────────
 
-    async def _check_resolution(
-        self, condition_id: str
-    ) -> Optional[float]:
+    async def _check_resolution(self, condition_id: str) -> float | None:
         """Return the resolution price if the market is resolved, else None.
 
         First checks cache; falls back to API.
@@ -111,7 +109,7 @@ class SettlementEngine:
 
         # Update cache
         is_resolved = market_data.get("closed", False) or market_data.get("resolved", False)
-        resolution_price: Optional[float] = None
+        resolution_price: float | None = None
 
         if is_resolved:
             # Polymarket resolution: winning outcome resolves to 1.0, losing to 0.0
@@ -119,6 +117,7 @@ class SettlementEngine:
             outcome_prices = market_data.get("outcomePrices", [0])
             if isinstance(outcome_prices, str):
                 import json
+
                 try:
                     outcome_prices = json.loads(outcome_prices)
                 except (json.JSONDecodeError, TypeError):
@@ -141,9 +140,7 @@ class SettlementEngine:
 
         return resolution_price if is_resolved else None
 
-    def _calculate_pnl(
-        self, trade: Dict[str, Any], resolution_price: float
-    ) -> tuple[float, float]:
+    def _calculate_pnl(self, trade: dict[str, Any], resolution_price: float) -> tuple[float, float]:
         """Calculate realised PnL for a simulated trade.
 
         For a BUY on YES token:

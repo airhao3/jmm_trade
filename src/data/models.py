@@ -2,19 +2,17 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from datetime import datetime
-from enum import Enum
-from typing import Optional
+from dataclasses import dataclass
+from enum import StrEnum
 
 
-class TradeStatus(str, Enum):
+class TradeStatus(StrEnum):
     OPEN = "OPEN"
     SETTLED = "SETTLED"
     FAILED = "FAILED"
 
 
-class TradeSide(str, Enum):
+class TradeSide(StrEnum):
     BUY = "BUY"
     SELL = "SELL"
 
@@ -38,31 +36,31 @@ class SimTrade:
     target_price: float = 0.0
     target_size: float = 0.0
     target_timestamp: int = 0
-    target_execution_time: Optional[int] = None
-    target_pnl: Optional[float] = None
+    target_execution_time: int | None = None
+    target_pnl: float | None = None
 
     # Simulation
     sim_delay: int = 0
-    sim_price: Optional[float] = None
-    sim_delayed_price: Optional[float] = None
+    sim_price: float | None = None
+    sim_delayed_price: float | None = None
     sim_investment: float = 100.0
     sim_fee: float = 0.0
     sim_success: bool = True
-    sim_failure_reason: Optional[str] = None
+    sim_failure_reason: str | None = None
 
     # Cost
-    slippage_pct: Optional[float] = None
+    slippage_pct: float | None = None
     total_cost: float = 0.0
 
     # Status
     status: str = TradeStatus.OPEN.value
-    settlement_price: Optional[float] = None
-    pnl: Optional[float] = None
-    pnl_pct: Optional[float] = None
+    settlement_price: float | None = None
+    pnl: float | None = None
+    pnl_pct: float | None = None
 
     # Timestamps
-    created_at: Optional[str] = None
-    settled_at: Optional[str] = None
+    created_at: str | None = None
+    settled_at: str | None = None
 
     def to_dict(self) -> dict:
         return {k: v for k, v in self.__dict__.items()}
@@ -76,13 +74,13 @@ class MarketInfo:
     market_id: str = ""
     market_name: str = ""
     event_slug: str = ""
-    end_date: Optional[str] = None
+    end_date: str | None = None
     is_active: bool = True
     is_resolved: bool = False
-    resolution_price: Optional[float] = None
+    resolution_price: float | None = None
     cache_ttl: int = 3600
-    last_updated: Optional[str] = None
-    created_at: Optional[str] = None
+    last_updated: str | None = None
+    created_at: str | None = None
 
 
 @dataclass
@@ -91,8 +89,8 @@ class MetricRecord:
 
     metric_type: str
     metric_value: float
-    metadata: Optional[str] = None
-    timestamp: Optional[str] = None
+    metadata: str | None = None
+    timestamp: str | None = None
 
 
 @dataclass

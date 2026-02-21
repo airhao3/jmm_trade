@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, List
+from typing import Any
 
 from loguru import logger
 
@@ -16,7 +16,7 @@ class Portfolio:
     def __init__(self, db: Database) -> None:
         self.db = db
 
-    async def get_open_positions(self) -> List[Dict[str, Any]]:
+    async def get_open_positions(self) -> list[dict[str, Any]]:
         """Return all currently open simulated positions."""
         return await self.db.get_open_trades()
 
@@ -24,9 +24,7 @@ class Portfolio:
         """Aggregate statistics across all trades."""
         return await self.db.get_statistics()
 
-    async def get_pnl_summary(
-        self, target_address: str | None = None
-    ) -> List[Dict[str, Any]]:
+    async def get_pnl_summary(self, target_address: str | None = None) -> list[dict[str, Any]]:
         """Grouped PnL breakdown by target account and delay."""
         return await self.db.get_pnl_summary(target_address)
 

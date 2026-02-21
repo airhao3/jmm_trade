@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import asyncio
 import platform
-import shlex
 
 from loguru import logger
 
 from src.config.models import IMessageConfig
+
 from .manager import NotificationChannel
 
 
@@ -42,14 +42,16 @@ class IMessageNotifier(NotificationChannel):
 
             script = (
                 f'tell application "Messages"\n'
-                f'  set targetService to 1st account whose service type = iMessage\n'
+                f"  set targetService to 1st account whose service type = iMessage\n"
                 f'  set targetBuddy to participant "{phone}" of targetService\n'
                 f'  send "{escaped_msg}" to targetBuddy\n'
                 f"end tell"
             )
 
             proc = await asyncio.create_subprocess_exec(
-                "osascript", "-e", script,
+                "osascript",
+                "-e",
+                script,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )

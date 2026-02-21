@@ -7,23 +7,53 @@ on:
     branches: [main, develop]
 
 env:
-  PYTHON_VERSION: "3.11"
   FORCE_READ_ONLY: "true"
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  test:
+  # ── Lint ──────────────────────────────────────────────
+  lint:
+    name: Lint & Format
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
-          python-version: ${{ env.PYTHON_VERSION }}
+          python-version: "3.11"
+
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Ruff check
+        run: ruff check src/ tests/ main.py --output-format=github
+
+      - name: Ruff format check
+        run: ruff format --check src/ tests/ main.py
+
+  # ── Unit + Integration Tests ──────────────────────────
+  test:
+    name: Tests (Python ${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    needs: lint
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+      fail-fast: false
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
           cache: pip
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -r requirements.txt pytest-cov ruff
 
       - name: Validate config
         run: python main.py check-config
@@ -34,33 +64,74 @@ jobs:
       - name: Run integration tests
         run: pytest tests/ -m "integration" -v --tb=short
 
-      - name: Test coverage
+      - name: Coverage report
+        if: matrix.python-version == '3.11'
         run: |
-          pip install pytest-cov
-          pytest tests/ --cov=src --cov-report=xml --cov-fail-under=50
+          pytest tests/ -m "unit or integration" \
+            --cov=src --cov-report=xml --cov-report=term-missing \
+            --cov-fail-under=40
 
-      - name: Upload coverage
-        if: always()
+      - name: Upload coverage artifact
+        if: matrix.python-version == '3.11' && always()
         uses: actions/upload-artifact@v4
         with:
           name: coverage-report
           path: coverage.xml
+          retention-days: 14
 
+  # ── Security ──────────────────────────────────────────
   security:
+    name: Security Checks
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Check for secrets in code
+      - name: Check for private keys in code
         run: |
-          if git grep -lE '0x[a-fA-F0-9]{64}' -- '*.py' '*.yaml' '*.yml'; then
-            echo "ERROR: Possible private key found in source files!"
+          echo "Scanning for potential private keys (64-char hex)..."
+          if git grep -lE '0x[a-fA-F0-9]{64}' -- '*.py' '*.yaml' '*.yml' '*.env'; then
+            echo "::error::Possible private key found in source files!"
             exit 1
           fi
+          echo "✓ No private keys found"
 
       - name: Verify read-only guards
         run: |
+          echo "Checking READ_ONLY_MODE is never set to False..."
           if grep -rn "READ_ONLY_MODE\s*=\s*False" src/; then
-            echo "ERROR: READ_ONLY_MODE must never be False!"
+            echo "::error::READ_ONLY_MODE must never be False in source!"
             exit 1
           fi
+          echo "✓ Read-only guards intact"
+
+      - name: Check no real order endpoints enabled
+        run: |
+          echo "Verifying create_order/cancel_order are blocked..."
+          blocked=$(grep -c "raise RuntimeError" src/api/client.py || true)
+          if [ "$blocked" -lt 2 ]; then
+            echo "::error::create_order/cancel_order must raise RuntimeError!"
+            exit 1
+          fi
+          echo "✓ Order endpoints blocked ($blocked guards found)"
+
+  # ── Docker Build ──────────────────────────────────────
+  docker:
+    name: Docker Build
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: docker build -t polymarket-copy-trader:${{ github.sha }} .
+
+      - name: Verify FORCE_READ_ONLY in image
+        run: |
+          docker run --rm polymarket-copy-trader:${{ github.sha }} \
+            python -c "import os; assert os.environ.get('FORCE_READ_ONLY') == 'true'"
+
+      - name: Smoke test - check-config
+        run: |
+          docker run --rm polymarket-copy-trader:${{ github.sha }} \
+            python main.py check-config

@@ -5,12 +5,13 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import aiohttp
 from loguru import logger
 
 from src.config.models import APIConfig, SystemConfig
+
 from .rate_limiter import TokenBucketRateLimiter
 
 # ── Safety guard ─────────────────────────────────────────
@@ -46,10 +47,10 @@ class PolymarketClient:
             time_window=api_config.rate_limit.time_window,
             burst_size=api_config.rate_limit.burst_size,
         )
-        self._session: Optional[aiohttp.ClientSession] = None
+        self._session: aiohttp.ClientSession | None = None
         self._request_count: int = 0
         self._total_latency: float = 0.0
-        self._on_latency: Optional[Any] = None  # callback(latency_seconds)
+        self._on_latency: Any | None = None  # callback(latency_seconds)
 
     def set_latency_callback(self, callback: Any) -> None:
         """Register a callback invoked with each request's latency in seconds."""
@@ -57,7 +58,7 @@ class PolymarketClient:
 
     # ── Context manager ──────────────────────────────────
 
-    async def __aenter__(self) -> "PolymarketClient":
+    async def __aenter__(self) -> PolymarketClient:
         headers = {"Accept": "application/json"}
 
         # Attach API key if available (read-only scope)
@@ -88,7 +89,7 @@ class PolymarketClient:
         _assert_read_only()
         await self.rate_limiter.acquire()
 
-        last_exc: Optional[Exception] = None
+        last_exc: Exception | None = None
         for attempt in range(1, max_retries + 1):
             try:
                 t0 = time.monotonic()
@@ -107,24 +108,19 @@ class PolymarketClient:
 
                     # Don't retry client errors (4xx except 429) — they're permanent
                     if 400 <= resp.status < 500:
-                        logger.debug(
-                            f"[{method}] {url} -> {resp.status} (no retry)"
-                        )
+                        logger.debug(f"[{method}] {url} -> {resp.status} (no retry)")
                         return None
 
                     resp.raise_for_status()
                     data = await resp.json()
-                    logger.debug(
-                        f"[{method}] {url} -> {resp.status} ({latency:.3f}s)"
-                    )
+                    logger.debug(f"[{method}] {url} -> {resp.status} ({latency:.3f}s)")
                     return data
 
-            except (aiohttp.ClientError, asyncio.TimeoutError) as exc:
+            except (TimeoutError, aiohttp.ClientError) as exc:
                 last_exc = exc
                 wait = 2**attempt
                 logger.warning(
-                    f"Request failed ({attempt}/{max_retries}): {exc} – "
-                    f"retrying in {wait}s"
+                    f"Request failed ({attempt}/{max_retries}): {exc} – retrying in {wait}s"
                 )
                 if attempt < max_retries:
                     await asyncio.sleep(wait)
@@ -148,11 +144,11 @@ class PolymarketClient:
         user_address: str,
         limit: int = 100,
         offset: int = 0,
-        side: Optional[str] = None,
-    ) -> List[Dict]:
+        side: str | None = None,
+    ) -> list[dict]:
         """GET /trades – fetch trade history for a user."""
         url = f"{self.config.base_urls['data']}/trades"
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "user": user_address,
             "limit": min(limit, 10000),
             "offset": offset,
@@ -166,17 +162,17 @@ class PolymarketClient:
         user_address: str,
         limit: int = 100,
         activity_type: str = "TRADE",
-    ) -> List[Dict]:
+    ) -> list[dict]:
         """GET /activity – fetch activity log for a user."""
         url = f"{self.config.base_urls['data']}/activity"
-        params: Dict[str, Any] = {
+        params: dict[str, Any] = {
             "user": user_address,
             "limit": min(limit, 500),
             "type": activity_type,
         }
         return await self._request("GET", url, params=params) or []
 
-    async def get_positions(self, user_address: str) -> List[Dict]:
+    async def get_positions(self, user_address: str) -> list[dict]:
         """GET /positions – current open positions for a user."""
         url = f"{self.config.base_urls['data']}/positions"
         params = {"user": user_address}
@@ -184,36 +180,34 @@ class PolymarketClient:
 
     # ── CLOB API ─────────────────────────────────────────
 
-    async def get_orderbook(self, token_id: str) -> Dict:
+    async def get_orderbook(self, token_id: str) -> dict:
         """GET /book – order book for a specific token."""
         url = f"{self.config.base_urls['clob']}/book"
         params = {"token_id": token_id}
         return await self._request("GET", url, params=params) or {"asks": [], "bids": []}
 
-    async def get_price(self, token_id: str) -> Dict:
+    async def get_price(self, token_id: str) -> dict:
         """GET /price – current price for a token."""
         url = f"{self.config.base_urls['clob']}/price"
         params = {"token_id": token_id}
         return await self._request("GET", url, params=params)
 
-    async def get_midpoint(self, token_id: str) -> Dict:
+    async def get_midpoint(self, token_id: str) -> dict:
         """GET /midpoint – midpoint price."""
         url = f"{self.config.base_urls['clob']}/midpoint"
         params = {"token_id": token_id}
         return await self._request("GET", url, params=params)
 
-    async def get_spread(self, token_id: str) -> Dict:
+    async def get_spread(self, token_id: str) -> dict:
         """GET /spread – bid-ask spread."""
         url = f"{self.config.base_urls['clob']}/spread"
         params = {"token_id": token_id}
         return await self._request("GET", url, params=params)
 
-    async def batch_get_orderbooks(
-        self, token_ids: List[str]
-    ) -> Dict[str, Dict]:
+    async def batch_get_orderbooks(self, token_ids: list[str]) -> dict[str, dict]:
         """Concurrently fetch order books for multiple tokens."""
         tasks = {tid: self.get_orderbook(tid) for tid in token_ids}
-        results: Dict[str, Dict] = {}
+        results: dict[str, dict] = {}
         for tid, coro in tasks.items():
             try:
                 results[tid] = await coro
@@ -223,7 +217,7 @@ class PolymarketClient:
 
     # ── Gamma API ────────────────────────────────────────
 
-    async def get_market(self, condition_id: str) -> Dict:
+    async def get_market(self, condition_id: str) -> dict:
         """GET /markets?condition_id= – market metadata."""
         url = f"{self.config.base_urls['gamma']}/markets"
         data = await self._request("GET", url, params={"condition_id": condition_id})
@@ -233,7 +227,7 @@ class PolymarketClient:
             return data[0] if data else {}
         return data
 
-    async def get_event(self, event_id: str) -> Dict:
+    async def get_event(self, event_id: str) -> dict:
         """GET /events?id= – event metadata."""
         url = f"{self.config.base_urls['gamma']}/events"
         data = await self._request("GET", url, params={"id": event_id})
@@ -243,12 +237,10 @@ class PolymarketClient:
             return data[0] if data else {}
         return data
 
-    async def search_markets(
-        self, query: str, limit: int = 20
-    ) -> List[Dict]:
+    async def search_markets(self, query: str, limit: int = 20) -> list[dict]:
         """GET /markets – search/list markets."""
         url = f"{self.config.base_urls['gamma']}/markets"
-        params: Dict[str, Any] = {"limit": limit}
+        params: dict[str, Any] = {"limit": limit}
         if query:
             # Gamma API uses a general listing; filter client-side
             pass
@@ -265,7 +257,4 @@ class PolymarketClient:
 
     async def cancel_order(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG002
         """BLOCKED – cancel_order is disabled in read-only mode."""
-        raise RuntimeError(
-            "cancel_order is PERMANENTLY DISABLED. "
-            "READ_ONLY_MODE is active."
-        )
+        raise RuntimeError("cancel_order is PERMANENTLY DISABLED. READ_ONLY_MODE is active.")

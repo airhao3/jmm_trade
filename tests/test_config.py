@@ -16,8 +16,8 @@ from src.config.models import (
     TargetAccount,
 )
 
-
 # ── C01: Valid config loads ──────────────────────────────
+
 
 @pytest.mark.unit
 def test_valid_config_loads(raw_config_dict):
@@ -29,23 +29,25 @@ def test_valid_config_loads(raw_config_dict):
 
 # ── C02: Invalid address rejected ────────────────────────
 
+
 @pytest.mark.unit
 def test_invalid_address_rejected():
-    with pytest.raises(Exception):
+    with pytest.raises((ValueError, Exception)):
         TargetAccount(address="0xZZZinvalid", nickname="bad", active=True)
 
 
 @pytest.mark.unit
 def test_short_address_rejected():
-    with pytest.raises(Exception):
+    with pytest.raises((ValueError, Exception)):
         TargetAccount(address="0xabc", nickname="short", active=True)
 
 
 # ── C03: Negative delay rejected ────────────────────────
 
+
 @pytest.mark.unit
 def test_negative_delay_rejected():
-    with pytest.raises(Exception):
+    with pytest.raises((ValueError, Exception)):
         SimulationConfig(delays=[-1, 3])
 
 
@@ -56,6 +58,7 @@ def test_zero_delay_accepted():
 
 
 # ── C04: Delays auto-sorted and deduplicated ────────────
+
 
 @pytest.mark.unit
 def test_delays_auto_sorted():
@@ -71,9 +74,10 @@ def test_delays_single():
 
 # ── C05: Duration range enforced ────────────────────────
 
+
 @pytest.mark.unit
 def test_duration_range_invalid():
-    with pytest.raises(Exception):
+    with pytest.raises((ValueError, Exception)):
         MarketFilterConfig(
             assets=["BTC"],
             min_duration_minutes=15,
@@ -95,9 +99,10 @@ def test_duration_range_equal_is_ok():
 
 # ── C06: Invalid log level ──────────────────────────────
 
+
 @pytest.mark.unit
 def test_invalid_log_level():
-    with pytest.raises(Exception):
+    with pytest.raises((ValueError, Exception)):
         LoggingConfig(level="VERBOSE")
 
 
@@ -109,6 +114,7 @@ def test_valid_log_level():
 
 # ── C07: FORCE_READ_ONLY env override ───────────────────
 
+
 @pytest.mark.unit
 def test_force_read_only_env_override():
     os.environ["FORCE_READ_ONLY"] = "true"
@@ -119,15 +125,17 @@ def test_force_read_only_env_override():
 
 # ── C08: No active targets ──────────────────────────────
 
+
 @pytest.mark.unit
 def test_no_active_targets_rejected(raw_config_dict):
     d = deepcopy(raw_config_dict)
     d["targets"][0]["active"] = False
-    with pytest.raises(Exception):
+    with pytest.raises((ValueError, Exception)):
         AppConfig(**d)
 
 
 # ── C09: Address auto-lowercased ─────────────────────────
+
 
 @pytest.mark.unit
 def test_address_auto_lowercased():
@@ -140,9 +148,10 @@ def test_address_auto_lowercased():
 
 # ── C10: Fee rate boundaries ─────────────────────────────
 
+
 @pytest.mark.unit
 def test_fee_rate_too_high():
-    with pytest.raises(Exception):
+    with pytest.raises((ValueError, Exception)):
         SimulationConfig(fee_rate=0.5)
 
 

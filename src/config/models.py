@@ -4,18 +4,17 @@ from __future__ import annotations
 
 import os
 import re
-from enum import Enum
-from typing import Dict, List, Optional
+from enum import StrEnum
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-class MonitorMode(str, Enum):
+class MonitorMode(StrEnum):
     POLL = "poll"
     WEBSOCKET = "websocket"
 
 
-class LogFormat(str, Enum):
+class LogFormat(StrEnum):
     JSON = "json"
     TEXT = "text"
 
@@ -26,7 +25,7 @@ class SystemConfig(BaseModel):
     force_read_only: bool = True
 
     @model_validator(mode="after")
-    def enforce_read_only(self) -> "SystemConfig":
+    def enforce_read_only(self) -> SystemConfig:
         env_override = os.getenv("FORCE_READ_ONLY", "true").lower()
         if env_override == "true":
             self.read_only_mode = True
@@ -45,7 +44,7 @@ class MonitoringConfig(BaseModel):
 
 # ── Simulation ───────────────────────────────────────────
 class SimulationConfig(BaseModel):
-    delays: List[int] = Field(default=[1, 3])
+    delays: list[int] = Field(default=[1, 3])
     investment_per_trade: float = Field(ge=1.0, default=100.0)
     fee_rate: float = Field(ge=0.0, le=0.1, default=0.015)
     enable_slippage_check: bool = True
@@ -53,7 +52,7 @@ class SimulationConfig(BaseModel):
 
     @field_validator("delays")
     @classmethod
-    def validate_delays(cls, v: List[int]) -> List[int]:
+    def validate_delays(cls, v: list[int]) -> list[int]:
         if not all(d >= 0 for d in v):
             raise ValueError("All delays must be non-negative integers")
         return sorted(set(v))
@@ -62,14 +61,14 @@ class SimulationConfig(BaseModel):
 # ── Market Filter ────────────────────────────────────────
 class MarketFilterConfig(BaseModel):
     enabled: bool = True
-    assets: List[str] = Field(default=["BTC", "ETH", "Bitcoin", "Ethereum"])
+    assets: list[str] = Field(default=["BTC", "ETH", "Bitcoin", "Ethereum"])
     min_duration_minutes: int = Field(ge=1, default=5)
     max_duration_minutes: int = Field(ge=1, default=15)
-    keywords: List[str] = Field(default=["up", "down", "higher", "lower"])
-    exclude_keywords: List[str] = Field(default=[])
+    keywords: list[str] = Field(default=["up", "down", "higher", "lower"])
+    exclude_keywords: list[str] = Field(default=[])
 
     @model_validator(mode="after")
-    def check_duration_range(self) -> "MarketFilterConfig":
+    def check_duration_range(self) -> MarketFilterConfig:
         if self.min_duration_minutes > self.max_duration_minutes:
             raise ValueError("min_duration_minutes must be <= max_duration_minutes")
         return self
@@ -98,8 +97,8 @@ class RateLimitConfig(BaseModel):
 
 
 class APIConfig(BaseModel):
-    base_urls: Dict[str, str]
-    websocket_urls: Dict[str, str] = Field(default={})
+    base_urls: dict[str, str]
+    websocket_urls: dict[str, str] = Field(default={})
     timeout: int = Field(ge=5, le=120, default=30)
     rate_limit: RateLimitConfig = Field(default_factory=RateLimitConfig)
 
@@ -107,12 +106,12 @@ class APIConfig(BaseModel):
 # ── Notifications ────────────────────────────────────────
 class TelegramConfig(BaseModel):
     enabled: bool = False
-    bot_token: Optional[str] = None
-    chat_id: Optional[str] = None
+    bot_token: str | None = None
+    chat_id: str | None = None
     rate_limit: int = Field(ge=1, default=20)
 
     @model_validator(mode="after")
-    def resolve_env_vars(self) -> "TelegramConfig":
+    def resolve_env_vars(self) -> TelegramConfig:
         if self.enabled:
             if self.bot_token and self.bot_token.startswith("${"):
                 env_key = self.bot_token[2:-1]
@@ -125,10 +124,10 @@ class TelegramConfig(BaseModel):
 
 class IMessageConfig(BaseModel):
     enabled: bool = False
-    phone_number: Optional[str] = None
+    phone_number: str | None = None
 
     @model_validator(mode="after")
-    def resolve_env_vars(self) -> "IMessageConfig":
+    def resolve_env_vars(self) -> IMessageConfig:
         if self.enabled and self.phone_number and self.phone_number.startswith("${"):
             env_key = self.phone_number[2:-1]
             self.phone_number = os.getenv(env_key)
@@ -139,7 +138,7 @@ class NotificationsConfig(BaseModel):
     enabled: bool = True
     aggregation_interval: int = Field(ge=5, default=30)
     max_retries: int = Field(ge=0, default=3)
-    retry_backoff: List[int] = Field(default=[1, 2, 4])
+    retry_backoff: list[int] = Field(default=[1, 2, 4])
     telegram: TelegramConfig = Field(default_factory=TelegramConfig)
     imessage: IMessageConfig = Field(default_factory=IMessageConfig)
 
@@ -185,7 +184,7 @@ class AppConfig(BaseModel):
     monitoring: MonitoringConfig = Field(default_factory=MonitoringConfig)
     simulation: SimulationConfig = Field(default_factory=SimulationConfig)
     market_filter: MarketFilterConfig = Field(default_factory=MarketFilterConfig)
-    targets: List[TargetAccount] = Field(default=[])
+    targets: list[TargetAccount] = Field(default=[])
     api: APIConfig
     notifications: NotificationsConfig = Field(default_factory=NotificationsConfig)
     database: DatabaseConfig = Field(default_factory=DatabaseConfig)
@@ -193,11 +192,11 @@ class AppConfig(BaseModel):
     logging: LoggingConfig = Field(default_factory=LoggingConfig)
 
     @model_validator(mode="after")
-    def validate_has_targets(self) -> "AppConfig":
+    def validate_has_targets(self) -> AppConfig:
         active = [t for t in self.targets if t.active]
         if not active:
             raise ValueError("At least one active target account is required")
         return self
 
-    def get_active_targets(self) -> List[TargetAccount]:
+    def get_active_targets(self) -> list[TargetAccount]:
         return [t for t in self.targets if t.active]

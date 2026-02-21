@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from src.data.models import MarketInfo, SimTrade
+from src.data.models import MarketInfo
 
 
 @pytest.mark.integration
@@ -104,9 +104,7 @@ async def test_upsert_account(db):
     await db.upsert_account(addr, "PBot1", 1.0)
     await db.upsert_account(addr, "PBot1_Updated", 0.8)
 
-    async with db._db.execute(
-        "SELECT * FROM monitored_accounts WHERE address = ?", (addr,)
-    ) as cur:
+    async with db._db.execute("SELECT * FROM monitored_accounts WHERE address = ?", (addr,)) as cur:
         row = await cur.fetchone()
         assert dict(row)["nickname"] == "PBot1_Updated"
         assert dict(row)["weight"] == 0.8
@@ -187,9 +185,7 @@ async def test_log_notification(db):
         success=True,
     )
 
-    async with db._db.execute(
-        "SELECT COUNT(*) as c FROM notification_history"
-    ) as cur:
+    async with db._db.execute("SELECT COUNT(*) as c FROM notification_history") as cur:
         row = await cur.fetchone()
         assert row["c"] == 1
 

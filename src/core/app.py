@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import time
-from typing import Any, Dict
+from typing import Any
 
 from loguru import logger
 
@@ -66,9 +66,7 @@ class Application:
 
         # Sync target accounts to DB
         for target in self.config.get_active_targets():
-            await self.db.upsert_account(
-                target.address, target.nickname, target.weight
-            )
+            await self.db.upsert_account(target.address, target.nickname, target.weight)
 
         # ── Rate limiter ─────────────────────────────────
         rl = TokenBucketRateLimiter(
@@ -78,16 +76,12 @@ class Application:
         )
 
         # ── API client (context manager) ─────────────────
-        async with PolymarketClient(
-            self.config.api, self.config.system, rl
-        ) as api:
+        async with PolymarketClient(self.config.api, self.config.system, rl) as api:
             self.api = api
 
             # ── Metrics ──────────────────────────────
             self.metrics = MetricsCollector(self.config.logging, self.db)
-            self.metrics.active_accounts = len(
-                self.config.get_active_targets()
-            )
+            self.metrics.active_accounts = len(self.config.get_active_targets())
 
             # ── Wire API latency -> metrics ──────────────
             api.set_latency_callback(self.metrics.record_api_latency)
@@ -102,17 +96,11 @@ class Application:
             self.portfolio = Portfolio(self.db)
 
             # ── Notifications ────────────────────────────
-            self.notifier = NotificationManager(
-                self.config.notifications, self.db
-            )
+            self.notifier = NotificationManager(self.config.notifications, self.db)
             if self.config.notifications.telegram.enabled:
-                self.notifier.register_channel(
-                    TelegramNotifier(self.config.notifications.telegram)
-                )
+                self.notifier.register_channel(TelegramNotifier(self.config.notifications.telegram))
             if self.config.notifications.imessage.enabled:
-                self.notifier.register_channel(
-                    IMessageNotifier(self.config.notifications.imessage)
-                )
+                self.notifier.register_channel(IMessageNotifier(self.config.notifications.imessage))
 
             # ── Wire monitor -> simulator -> notifier ────
             self.monitor.on_new_trade(self._on_new_trade)
@@ -122,17 +110,9 @@ class Application:
 
             # Monitoring (with metrics sync)
             if self.config.monitoring.mode.value == "poll":
-                tasks.append(
-                    asyncio.create_task(
-                        self._poll_loop_with_metrics(), name="poll_loop"
-                    )
-                )
+                tasks.append(asyncio.create_task(self._poll_loop_with_metrics(), name="poll_loop"))
             else:
-                tasks.append(
-                    asyncio.create_task(
-                        self._run_websocket(), name="ws_loop"
-                    )
-                )
+                tasks.append(asyncio.create_task(self._run_websocket(), name="ws_loop"))
 
             # Settlement
             tasks.append(
@@ -144,34 +124,18 @@ class Application:
 
             # Notifications
             if self.config.notifications.enabled:
-                tasks.append(
-                    asyncio.create_task(
-                        self.notifier.run(), name="notifier"
-                    )
-                )
+                tasks.append(asyncio.create_task(self.notifier.run(), name="notifier"))
 
             # Metrics
             if self.config.logging.metrics_enabled:
-                tasks.append(
-                    asyncio.create_task(
-                        self.metrics.run(), name="metrics"
-                    )
-                )
+                tasks.append(asyncio.create_task(self.metrics.run(), name="metrics"))
 
             # Periodic portfolio log
-            tasks.append(
-                asyncio.create_task(
-                    self._periodic_portfolio_log(), name="portfolio_log"
-                )
-            )
+            tasks.append(asyncio.create_task(self._periodic_portfolio_log(), name="portfolio_log"))
 
             # Auto CSV export
             if self.config.export.enabled:
-                tasks.append(
-                    asyncio.create_task(
-                        self._periodic_export(), name="csv_export"
-                    )
-                )
+                tasks.append(asyncio.create_task(self._periodic_export(), name="csv_export"))
 
             logger.info(f"Launched {len(tasks)} background tasks")
 
@@ -190,9 +154,7 @@ class Application:
 
     # ── Callbacks ────────────────────────────────────────
 
-    async def _on_new_trade(
-        self, target: TargetAccount, trade: Dict[str, Any]
-    ) -> None:
+    async def _on_new_trade(self, target: TargetAccount, trade: dict[str, Any]) -> None:
         """Called by the monitor when a qualifying trade is found."""
         # Notify: new trade detected
         if self.notifier:
@@ -239,9 +201,7 @@ class Application:
 
     # ── Startup check ────────────────────────────────────
 
-    async def _startup_connectivity_test(
-        self, api: PolymarketClient
-    ) -> None:
+    async def _startup_connectivity_test(self, api: PolymarketClient) -> None:
         """Test API connectivity and log latency before starting."""
         targets = self.config.get_active_targets()
         logger.info("Running startup connectivity test...")
@@ -252,15 +212,12 @@ class Application:
                 trades = await api.get_trades(target.address, limit=3)
                 lat = (time.monotonic() - t0) * 1000
                 logger.info(
-                    f"  [{target.nickname}] Data API: OK "
-                    f"({len(trades)} trades, {lat:.0f}ms)"
+                    f"  [{target.nickname}] Data API: OK ({len(trades)} trades, {lat:.0f}ms)"
                 )
                 if trades:
                     t = trades[0]
                     logger.info(
-                        f"    Latest: {t.get('side')} "
-                        f"{t.get('title', '?')[:55]} "
-                        f"@ {t.get('price')}"
+                        f"    Latest: {t.get('side')} {t.get('title', '?')[:55]} @ {t.get('price')}"
                     )
                     # Test orderbook for the latest trade's token
                     token_id = t.get("asset", "")
@@ -271,18 +228,12 @@ class Application:
                         asks = book.get("asks", [])
                         bids = book.get("bids", [])
                         logger.info(
-                            f"    Orderbook: {len(asks)} asks, "
-                            f"{len(bids)} bids ({lat2:.0f}ms)"
+                            f"    Orderbook: {len(asks)} asks, {len(bids)} bids ({lat2:.0f}ms)"
                         )
             except Exception as exc:
-                logger.error(
-                    f"  [{target.nickname}] Connectivity FAILED: {exc}"
-                )
+                logger.error(f"  [{target.nickname}] Connectivity FAILED: {exc}")
 
-        logger.info(
-            f"Startup test complete (avg API latency: "
-            f"{api.avg_latency*1000:.0f}ms)"
-        )
+        logger.info(f"Startup test complete (avg API latency: {api.avg_latency * 1000:.0f}ms)")
 
     # ── Poll loop with metrics sync ──────────────────────
 
@@ -305,17 +256,17 @@ class Application:
                 if new_count > 0:
                     logger.info(
                         f"Poll #{self.monitor._poll_count}: "
-                        f"{new_count} new trades ({latency*1000:.0f}ms)"
+                        f"{new_count} new trades ({latency * 1000:.0f}ms)"
                     )
                 elif self.monitor._poll_count % 20 == 0:
                     avg = (
-                        self.monitor._total_poll_latency
-                        / self.monitor._poll_count
-                        * 1000
-                    ) if self.monitor._poll_count else 0
+                        (self.monitor._total_poll_latency / self.monitor._poll_count * 1000)
+                        if self.monitor._poll_count
+                        else 0
+                    )
                     logger.info(
                         f"Poll #{self.monitor._poll_count}: "
-                        f"no new trades ({latency*1000:.0f}ms, "
+                        f"no new trades ({latency * 1000:.0f}ms, "
                         f"avg={avg:.0f}ms)"
                     )
             except Exception:
@@ -330,7 +281,7 @@ class Application:
         """Start WebSocket-based monitoring (placeholder for future)."""
         ws = PolymarketWebSocket(self.config.api, channel="market")
 
-        async def _handle_ws_message(data: Dict[str, Any]) -> None:
+        async def _handle_ws_message(data: dict[str, Any]) -> None:
             logger.debug(f"WS message: {data.get('event_type', 'unknown')}")
 
         ws.on_message(_handle_ws_message)
@@ -339,15 +290,11 @@ class Application:
         for target in self.config.get_active_targets():
             try:
                 positions = await self.api.get_positions(target.address)
-                asset_ids = [
-                    p.get("asset", "") for p in positions if p.get("asset")
-                ]
+                asset_ids = [p.get("asset", "") for p in positions if p.get("asset")]
                 if asset_ids:
                     await ws.subscribe(asset_ids)
             except Exception as exc:
-                logger.warning(
-                    f"Failed to load positions for {target.nickname}: {exc}"
-                )
+                logger.warning(f"Failed to load positions for {target.nickname}: {exc}")
 
         await ws.run()
 

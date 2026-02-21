@@ -5,8 +5,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import time
-from typing import Any, Callable, Coroutine, Dict, List, Optional
+from collections.abc import Callable, Coroutine
+from typing import Any
 
 import websockets
 from loguru import logger
@@ -14,7 +14,7 @@ from loguru import logger
 from src.config.models import APIConfig
 
 # Type alias for message handlers
-MessageHandler = Callable[[Dict[str, Any]], Coroutine[Any, Any, None]]
+MessageHandler = Callable[[dict[str, Any]], Coroutine[Any, Any, None]]
 
 
 class PolymarketWebSocket:
@@ -38,9 +38,9 @@ class PolymarketWebSocket:
         self._url = api_config.websocket_urls.get(
             channel, "wss://ws-subscriptions-clob.polymarket.com/ws/market"
         )
-        self._ws: Optional[websockets.WebSocketClientProtocol] = None
-        self._handlers: List[MessageHandler] = []
-        self._subscribed_assets: List[str] = []
+        self._ws: websockets.WebSocketClientProtocol | None = None
+        self._handlers: list[MessageHandler] = []
+        self._subscribed_assets: list[str] = []
         self._running = False
         self._reconnect_count = 0
 
@@ -50,17 +50,15 @@ class PolymarketWebSocket:
         """Register a coroutine to handle incoming messages."""
         self._handlers.append(handler)
 
-    async def subscribe(self, asset_ids: List[str]) -> None:
+    async def subscribe(self, asset_ids: list[str]) -> None:
         """Subscribe to asset IDs (market channel)."""
         self._subscribed_assets = list(set(self._subscribed_assets + asset_ids))
         if self._ws and self._ws.open:
             await self._send_subscription()
 
-    async def unsubscribe(self, asset_ids: List[str]) -> None:
+    async def unsubscribe(self, asset_ids: list[str]) -> None:
         """Unsubscribe from asset IDs."""
-        self._subscribed_assets = [
-            a for a in self._subscribed_assets if a not in asset_ids
-        ]
+        self._subscribed_assets = [a for a in self._subscribed_assets if a not in asset_ids]
 
     async def run(self) -> None:
         """Main loop: connect, subscribe, listen, reconnect on failure."""

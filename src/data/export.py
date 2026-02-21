@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any
 
 from loguru import logger
 
@@ -13,7 +13,7 @@ from src.config.models import ExportConfig
 
 
 async def export_trades_to_csv(
-    trades: List[Dict[str, Any]],
+    trades: list[dict[str, Any]],
     config: ExportConfig,
     filename: str | None = None,
 ) -> str:
@@ -36,9 +36,7 @@ async def export_trades_to_csv(
     fieldnames = list(trades[0].keys())
 
     with open(filepath, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(
-            f, fieldnames=fieldnames, extrasaction="ignore"
-        )
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         if config.include_headers:
             writer.writeheader()
         writer.writerows(trades)
@@ -48,7 +46,7 @@ async def export_trades_to_csv(
 
 
 async def export_pnl_summary_to_csv(
-    summary: List[Dict[str, Any]],
+    summary: list[dict[str, Any]],
     config: ExportConfig,
 ) -> str:
     """Export PnL summary report."""

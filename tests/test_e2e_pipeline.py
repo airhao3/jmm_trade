@@ -25,7 +25,6 @@ import uuid
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 os.environ["FORCE_READ_ONLY"] = "true"
 
-from loguru import logger
 
 PASS = "\033[92m✓ PASS\033[0m"
 FAIL = "\033[91m✗ FAIL\033[0m"
@@ -46,14 +45,14 @@ async def main():
     print("  Pipeline Test – Full Success + Settlement Path")
     print("=" * 60)
 
-    from src.config.loader import load_config
     from src.api.client import PolymarketClient
     from src.api.rate_limiter import TokenBucketRateLimiter
+    from src.config.loader import load_config
     from src.config.models import DatabaseConfig
-    from src.data.database import Database
-    from src.core.simulator import TradeSimulator
-    from src.core.settlement import SettlementEngine
     from src.core.monitor import TradeMonitor
+    from src.core.settlement import SettlementEngine
+    from src.core.simulator import TradeSimulator
+    from src.data.database import Database
     from src.data.export import export_trades_to_csv
 
     config = load_config("config/config.yaml")
@@ -75,7 +74,6 @@ async def main():
     await db.upsert_account(target.address, target.nickname, target.weight)
 
     async with PolymarketClient(config.api, config.system, rl) as api:
-
         # ── Step 1: Find an active market with orderbook ─
         print("\n[Step 1] Find active market with orderbook...")
         trades = await api.get_trades(target.address, limit=20)
@@ -98,7 +96,7 @@ async def main():
                     if best_ask > 0.01 and best_ask < 0.99:
                         active_trade = t
                         active_book = book
-                        print(f"    Found: \"{t['title'][:50]}\"")
+                        print(f'    Found: "{t["title"][:50]}"')
                         print(f"    ask={best_ask} bid={best_bid}")
                         break
             except Exception:
@@ -159,7 +157,7 @@ async def main():
         }
 
         print(f"    Synthetic trade: BUY @ {current_price}")
-        print(f"    Title: \"{synthetic_trade['title'][:50]}\"")
+        print(f'    Title: "{synthetic_trade["title"][:50]}"')
         report("Synthetic trade created", True, f"price={current_price}")
 
         # ── Step 3: Market filter ────────────────────────
@@ -173,30 +171,32 @@ async def main():
         simulator = TradeSimulator(config, api, db)
         sim_results = await simulator.simulate(target, synthetic_trade)
 
-        report("Simulator produced records", len(sim_results) > 0,
-               f"{len(sim_results)} records")
+        report("Simulator produced records", len(sim_results) > 0, f"{len(sim_results)} records")
 
         success_count = 0
         for sr in sim_results:
             status_str = "SUCCESS" if sr.sim_success else f"FAILED({sr.sim_failure_reason})"
             slip = f"{sr.slippage_pct:.2f}%" if sr.slippage_pct is not None else "N/A"
-            print(f"    delay={sr.sim_delay}s: sim={sr.sim_price} "
-                  f"target={sr.target_price} slip={slip} "
-                  f"fee=${sr.sim_fee} status={sr.status} [{status_str}]")
+            print(
+                f"    delay={sr.sim_delay}s: sim={sr.sim_price} "
+                f"target={sr.target_price} slip={slip} "
+                f"fee=${sr.sim_fee} status={sr.status} [{status_str}]"
+            )
             if sr.sim_success:
                 success_count += 1
 
-        report("At least one OPEN trade", success_count > 0,
-               f"{success_count}/{len(sim_results)} succeeded")
+        report(
+            "At least one OPEN trade",
+            success_count > 0,
+            f"{success_count}/{len(sim_results)} succeeded",
+        )
 
         # ── Step 5: Verify DB state ──────────────────────
         print("\n[Step 5] Database state...")
         all_trades = await db.get_all_trades()
         open_trades = await db.get_open_trades()
-        report("All trades in DB", len(all_trades) == len(sim_results),
-               f"total={len(all_trades)}")
-        report("Open trades", len(open_trades) == success_count,
-               f"open={len(open_trades)}")
+        report("All trades in DB", len(all_trades) == len(sim_results), f"total={len(all_trades)}")
+        report("Open trades", len(open_trades) == success_count, f"open={len(open_trades)}")
 
         # ── Step 6: Settlement test ──────────────────────
         print("\n[Step 6] Settlement...")
@@ -210,8 +210,10 @@ async def main():
         if open_trades:
             trade = open_trades[0]
             print(f"\n    Manual settlement test for trade: {trade['trade_id'][:30]}...")
-            print(f"    side={trade['target_side']} sim_price={trade['sim_price']} "
-                  f"investment={trade['sim_investment']} fee={trade['sim_fee']}")
+            print(
+                f"    side={trade['target_side']} sim_price={trade['sim_price']} "
+                f"investment={trade['sim_investment']} fee={trade['sim_fee']}"
+            )
 
             # Simulate resolution at 1.0 (YES wins)
             resolution_price = 1.0
@@ -242,8 +244,11 @@ async def main():
 
             # Verify
             open_after = await db.get_open_trades()
-            report("Open trades decreased", len(open_after) < len(open_trades),
-                   f"was {len(open_trades)} now {len(open_after)}")
+            report(
+                "Open trades decreased",
+                len(open_after) < len(open_trades),
+                f"was {len(open_trades)} now {len(open_after)}",
+            )
         else:
             print("    No open trades to manually settle (all FAILED due to slippage)")
             report("Manual settlement", True, "skipped — no open trades")
@@ -251,21 +256,32 @@ async def main():
         # ── Step 7: Full statistics ──────────────────────
         print("\n[Step 7] Full statistics...")
         stats = await db.get_statistics()
-        print(f"    Total: {stats.total_trades} | Open: {stats.open_positions} | "
-              f"Settled: {stats.settled_trades} | Failed: {stats.failed_trades}")
-        print(f"    PnL: ${stats.total_pnl:+.2f} | Win: {stats.win_rate:.0f}% | "
-              f"Slip: {stats.avg_slippage:.2f}% | Fee: ${stats.avg_fee:.2f}")
-        print(f"    Best: ${stats.best_trade_pnl:+.2f} | Worst: ${stats.worst_trade_pnl:+.2f} | "
-              f"Investment: ${stats.total_investment:.2f}")
+        print(
+            f"    Total: {stats.total_trades} | Open: {stats.open_positions} | "
+            f"Settled: {stats.settled_trades} | Failed: {stats.failed_trades}"
+        )
+        print(
+            f"    PnL: ${stats.total_pnl:+.2f} | Win: {stats.win_rate:.0f}% | "
+            f"Slip: {stats.avg_slippage:.2f}% | Fee: ${stats.avg_fee:.2f}"
+        )
+        print(
+            f"    Best: ${stats.best_trade_pnl:+.2f} | Worst: ${stats.worst_trade_pnl:+.2f} | "
+            f"Investment: ${stats.total_investment:.2f}"
+        )
         report("Stats query complete", stats.total_trades > 0)
-        report("Settled trades counted", stats.settled_trades > 0 or len(open_trades) == 0,
-               f"settled={stats.settled_trades}")
+        report(
+            "Settled trades counted",
+            stats.settled_trades > 0 or len(open_trades) == 0,
+            f"settled={stats.settled_trades}",
+        )
 
         summary = await db.get_pnl_summary()
         for row in summary:
-            print(f"    {row['target_nickname']} delay={row['sim_delay']}s: "
-                  f"{row['trade_count']} trades | pnl=${row['total_pnl']:+.2f} | "
-                  f"win={row['win_rate']:.0f}% | slip={row['avg_slippage']:.2f}%")
+            print(
+                f"    {row['target_nickname']} delay={row['sim_delay']}s: "
+                f"{row['trade_count']} trades | pnl=${row['total_pnl']:+.2f} | "
+                f"win={row['win_rate']:.0f}% | slip={row['avg_slippage']:.2f}%"
+            )
         report("PnL summary", len(summary) > 0, f"{len(summary)} groups")
 
         # ── Step 8: CSV export ───────────────────────────
@@ -276,6 +292,7 @@ async def main():
 
         # Verify CSV content
         import csv
+
         with open(path) as f:
             reader = csv.reader(f)
             headers = next(reader)

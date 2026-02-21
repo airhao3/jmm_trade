@@ -63,6 +63,4 @@ def setup_logger(config: LoggingConfig) -> None:
             serialize=True,
         )
 
-    logger.info(
-        f"Logger initialised: level={config.level} format={config.format.value}"
-    )
+    logger.info(f"Logger initialised: level={config.level} format={config.format.value}")

@@ -36,7 +36,7 @@ async def test_second_poll_detects_new_trade(sample_config, mock_api_client, sam
     trade2["transactionHash"] = "0xsecond_trade_hash_234567890abcdef12345678"
 
     mock_api_client.get_trades.side_effect = [
-        [trade1],          # first poll: seed
+        [trade1],  # first poll: seed
         [trade1, trade2],  # second poll: trade2 is new
     ]
 
@@ -117,8 +117,9 @@ async def test_filter_exclude_keyword(sample_config, mock_api_client, sample_tra
 @pytest.mark.asyncio
 async def test_filter_disabled_passes_all(raw_config_dict, mock_api_client, sample_trade):
     """When filter is disabled, all trades should pass."""
-    from src.config.models import AppConfig
     from copy import deepcopy
+
+    from src.config.models import AppConfig
 
     d = deepcopy(raw_config_dict)
     d["market_filter"]["enabled"] = False

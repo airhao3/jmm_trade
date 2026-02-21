@@ -2,11 +2,10 @@
 
 from __future__ import annotations
 
-from typing import Optional
-
 from loguru import logger
 
 from src.config.models import TelegramConfig
+
 from .manager import NotificationChannel
 
 
@@ -32,8 +31,7 @@ class TelegramNotifier(NotificationChannel):
             return True
         except ImportError:
             logger.error(
-                "python-telegram-bot is not installed. "
-                "Run: pip install python-telegram-bot"
+                "python-telegram-bot is not installed. Run: pip install python-telegram-bot"
             )
             return False
         except Exception as exc:

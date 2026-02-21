@@ -3,14 +3,15 @@
 from __future__ import annotations
 
 import json
-import time
+from datetime import UTC
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import aiosqlite
 from loguru import logger
 
 from src.config.models import DatabaseConfig
+
 from .models import AccountStats, MarketInfo, SimTrade
 
 # ── Schema ───────────────────────────────────────────────
@@ -125,7 +126,7 @@ class Database:
     def __init__(self, config: DatabaseConfig) -> None:
         self.config = config
         self._db_path = config.path
-        self._db: Optional[aiosqlite.Connection] = None
+        self._db: aiosqlite.Connection | None = None
 
     # ── Lifecycle ────────────────────────────────────────
 
@@ -146,9 +147,7 @@ class Database:
 
     # ── Monitored Accounts ───────────────────────────────
 
-    async def upsert_account(
-        self, address: str, nickname: str, weight: float = 1.0
-    ) -> None:
+    async def upsert_account(self, address: str, nickname: str, weight: float = 1.0) -> None:
         await self._db.execute(
             """
             INSERT INTO monitored_accounts (address, nickname, weight)
@@ -193,18 +192,16 @@ class Database:
         ) as cur:
             return (await cur.fetchone()) is not None
 
-    async def get_open_trades(self) -> List[Dict[str, Any]]:
+    async def get_open_trades(self) -> list[dict[str, Any]]:
         async with self._db.execute(
             "SELECT * FROM sim_trades WHERE status = 'OPEN' ORDER BY created_at"
         ) as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
-    async def get_all_trades(self) -> List[Dict[str, Any]]:
+    async def get_all_trades(self) -> list[dict[str, Any]]:
         """Return all sim trades (OPEN, FAILED, SETTLED)."""
-        async with self._db.execute(
-            "SELECT * FROM sim_trades ORDER BY created_at"
-        ) as cur:
+        async with self._db.execute("SELECT * FROM sim_trades ORDER BY created_at") as cur:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
@@ -238,7 +235,7 @@ class Database:
 
     # ── Market Cache ─────────────────────────────────────
 
-    async def get_cached_market(self, condition_id: str) -> Optional[Dict[str, Any]]:
+    async def get_cached_market(self, condition_id: str) -> dict[str, Any] | None:
         """Return market info if cache is still valid, else None."""
         async with self._db.execute(
             "SELECT * FROM market_cache WHERE condition_id = ?",
@@ -254,13 +251,13 @@ class Database:
 
             # Check TTL
             if last_ts:
-                from datetime import datetime, timezone
+                from datetime import datetime
 
                 try:
                     updated = datetime.fromisoformat(last_ts)
                     if updated.tzinfo is None:
-                        updated = updated.replace(tzinfo=timezone.utc)
-                    age = (datetime.now(timezone.utc) - updated).total_seconds()
+                        updated = updated.replace(tzinfo=UTC)
+                    age = (datetime.now(UTC) - updated).total_seconds()
                     if age > ttl:
                         return None  # expired
                 except (ValueError, TypeError):
@@ -299,9 +296,7 @@ class Database:
         )
         await self._db.commit()
 
-    async def mark_market_resolved(
-        self, condition_id: str, resolution_price: float
-    ) -> None:
+    async def mark_market_resolved(self, condition_id: str, resolution_price: float) -> None:
         await self._db.execute(
             """
             UPDATE market_cache
@@ -313,7 +308,7 @@ class Database:
         )
         await self._db.commit()
 
-    async def get_active_market_ids(self) -> List[str]:
+    async def get_active_market_ids(self) -> list[str]:
         async with self._db.execute(
             "SELECT condition_id FROM market_cache WHERE is_active = 1 AND is_resolved = 0"
         ) as cur:
@@ -323,7 +318,7 @@ class Database:
     # ── Metrics ──────────────────────────────────────────
 
     async def insert_metric(
-        self, metric_type: str, value: float, metadata: Optional[dict] = None
+        self, metric_type: str, value: float, metadata: dict | None = None
     ) -> None:
         meta_str = json.dumps(metadata) if metadata else None
         await self._db.execute(
@@ -341,7 +336,7 @@ class Database:
         message: str,
         success: bool = True,
         retry_count: int = 0,
-        error_message: Optional[str] = None,
+        error_message: str | None = None,
     ) -> None:
         await self._db.execute(
             """
@@ -402,9 +397,7 @@ class Database:
             row = await cur.fetchone()
             stats.avg_slippage = row["a"]
 
-        async with self._db.execute(
-            "SELECT COALESCE(AVG(sim_fee), 0) as a FROM sim_trades"
-        ) as cur:
+        async with self._db.execute("SELECT COALESCE(AVG(sim_fee), 0) as a FROM sim_trades") as cur:
             row = await cur.fetchone()
             stats.avg_fee = row["a"]
 
@@ -436,9 +429,7 @@ class Database:
 
     # ── PnL Summary Query ────────────────────────────────
 
-    async def get_pnl_summary(
-        self, target_address: Optional[str] = None
-    ) -> List[Dict[str, Any]]:
+    async def get_pnl_summary(self, target_address: str | None = None) -> list[dict[str, Any]]:
         """Grouped PnL summary by target + delay."""
         where = ""
         params: tuple = ()
