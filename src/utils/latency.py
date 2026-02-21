@@ -61,10 +61,10 @@ class LatencyChecker:
                         await response.read()  # Ensure full response is received
                         elapsed_ms = (time.perf_counter() - start) * 1000
                         latencies.append(elapsed_ms)
-                        logger.debug(f"Latency test {i+1}/{samples}: {elapsed_ms:.1f}ms")
+                        logger.debug(f"Latency test {i + 1}/{samples}: {elapsed_ms:.1f}ms")
                 except Exception as exc:
                     failures += 1
-                    logger.warning(f"Latency test {i+1}/{samples} failed: {exc}")
+                    logger.warning(f"Latency test {i + 1}/{samples} failed: {exc}")
 
                 if i < samples - 1:  # Don't delay after last sample
                     await asyncio.sleep(delay_between_samples)
