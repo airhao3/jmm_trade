@@ -33,8 +33,16 @@ def setup_logger(config: LoggingConfig) -> None:
     log_dir = Path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
 
+    # ── Auto-detect TTY and adjust mode ──────────────────
+    # Live mode requires interactive terminal (TTY)
+    # If not available (e.g., systemd service), fallback to scroll mode
+    console_mode = config.console.mode
+    if console_mode == "live" and not sys.stdout.isatty():
+        console_mode = "scroll"
+        logger.warning("Live mode requires TTY, falling back to scroll mode")
+
     # ── Console output (only if not in live mode) ────────
-    if config.console.enabled and config.console.mode != "live":
+    if config.console.enabled and console_mode != "live":
         # Traditional scrolling console output
         logger.add(
             sys.stdout,
@@ -99,5 +107,5 @@ def setup_logger(config: LoggingConfig) -> None:
             retention=config.files.errors.retention,
         )
 
-    mode_str = f"mode={config.console.mode}" if config.console.enabled else "console=disabled"
+    mode_str = f"mode={console_mode}" if config.console.enabled else "console=disabled"
     logger.info(f"Logger initialised: level={config.level} {mode_str}")
