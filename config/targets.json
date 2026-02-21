@@ -1,0 +1,11 @@
+{
+  "targets": [
+    {
+      "address": "0x88f46b9e5d86b4fb85be55ab0ec4004264b9d4db",
+      "nickname": "PBot1",
+      "enabled": true,
+      "added_at": "2026-02-22T03:47:00Z",
+      "notes": "Primary target - high volume trader"
+    }
+  ]
+}

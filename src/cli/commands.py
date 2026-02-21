@@ -207,3 +207,177 @@ def check_config(ctx: click.Context) -> None:
     except Exception as exc:
         click.echo(f"Config validation FAILED: {exc}", err=True)
         raise SystemExit(1) from exc
+
+
+# ── Target Management ────────────────────────────────────────
+
+
+@cli.command("add-target")
+@click.argument("address")
+@click.argument("nickname")
+@click.option("--notes", default="", help="Optional notes about this target")
+@click.option("--disabled", is_flag=True, help="Add target in disabled state")
+def add_target(address: str, nickname: str, notes: str, disabled: bool) -> None:
+    """Add a new target address to track.
+
+    ADDRESS: Ethereum address (0x...)
+    NICKNAME: Human-readable name for this target
+    """
+    from src.utils.target_manager import TargetManager
+
+    manager = TargetManager()
+
+    try:
+        success = manager.add_target(
+            address=address,
+            nickname=nickname,
+            enabled=not disabled,
+            notes=notes,
+        )
+
+        if success:
+            click.echo(f"✓ Added target: {nickname} ({address})")
+            if disabled:
+                click.echo("  Status: DISABLED (use 'enable-target' to activate)")
+        else:
+            click.echo(f"✗ Target already exists: {address}", err=True)
+            raise SystemExit(1)
+
+    except ValueError as e:
+        click.echo(f"✗ Invalid address: {e}", err=True)
+        raise SystemExit(1) from e
+    except Exception as e:
+        click.echo(f"✗ Failed to add target: {e}", err=True)
+        raise SystemExit(1) from e
+
+
+@cli.command("remove-target")
+@click.argument("identifier")
+@click.option("--yes", "-y", is_flag=True, help="Skip confirmation prompt")
+def remove_target(identifier: str, yes: bool) -> None:
+    """Remove a target address.
+
+    IDENTIFIER: Address (0x...) or nickname
+    """
+    from src.utils.target_manager import TargetManager
+
+    manager = TargetManager()
+
+    # Get target info first
+    target = manager.get_target(identifier)
+    if not target:
+        click.echo(f"✗ Target not found: {identifier}", err=True)
+        raise SystemExit(1)
+
+    # Confirm removal
+    if not yes:
+        click.echo(f"Remove target: {target['nickname']} ({target['address']})?")
+        if not click.confirm("Are you sure?"):
+            click.echo("Cancelled")
+            return
+
+    success = manager.remove_target(identifier)
+    if success:
+        click.echo(f"✓ Removed target: {target['nickname']}")
+    else:
+        click.echo("✗ Failed to remove target", err=True)
+        raise SystemExit(1)
+
+
+@cli.command("list-targets")
+@click.option("--all", "show_all", is_flag=True, help="Show all targets including disabled")
+@click.option("--json", "output_json", is_flag=True, help="Output as JSON")
+def list_targets(show_all: bool, output_json: bool) -> None:
+    """List all tracked targets."""
+    import json
+
+    from src.utils.target_manager import TargetManager
+
+    manager = TargetManager()
+    targets = manager.list_targets(enabled_only=not show_all)
+
+    if not targets:
+        click.echo("No targets configured")
+        return
+
+    if output_json:
+        click.echo(json.dumps(targets, indent=2))
+        return
+
+    click.echo(f"\n{'='*80}")
+    click.echo(f"  TRACKED TARGETS ({len(targets)} total)")
+    click.echo(f"{'='*80}\n")
+
+    for target in targets:
+        status = "✓ ENABLED" if target.get("enabled", True) else "✗ DISABLED"
+        click.echo(f"{status}  {target['nickname']}")
+        click.echo(f"  Address: {target['address']}")
+        if target.get("notes"):
+            click.echo(f"  Notes:   {target['notes']}")
+        click.echo(f"  Added:   {target.get('added_at', 'N/A')}")
+        if target.get("updated_at"):
+            click.echo(f"  Updated: {target['updated_at']}")
+        click.echo()
+
+
+@cli.command("enable-target")
+@click.argument("identifier")
+def enable_target(identifier: str) -> None:
+    """Enable a target address.
+
+    IDENTIFIER: Address (0x...) or nickname
+    """
+    from src.utils.target_manager import TargetManager
+
+    manager = TargetManager()
+    success = manager.enable_target(identifier)
+
+    if success:
+        click.echo(f"✓ Enabled target: {identifier}")
+    else:
+        click.echo(f"✗ Target not found: {identifier}", err=True)
+        raise SystemExit(1)
+
+
+@cli.command("disable-target")
+@click.argument("identifier")
+def disable_target(identifier: str) -> None:
+    """Disable a target address.
+
+    IDENTIFIER: Address (0x...) or nickname
+    """
+    from src.utils.target_manager import TargetManager
+
+    manager = TargetManager()
+    success = manager.disable_target(identifier)
+
+    if success:
+        click.echo(f"✓ Disabled target: {identifier}")
+    else:
+        click.echo(f"✗ Target not found: {identifier}", err=True)
+        raise SystemExit(1)
+
+
+@cli.command("update-target")
+@click.argument("identifier")
+@click.option("--nickname", help="New nickname")
+@click.option("--notes", help="New notes")
+def update_target(identifier: str, nickname: str | None, notes: str | None) -> None:
+    """Update target information.
+
+    IDENTIFIER: Address (0x...) or current nickname
+    """
+    from src.utils.target_manager import TargetManager
+
+    if not nickname and not notes:
+        click.echo("✗ Must specify --nickname or --notes", err=True)
+        raise SystemExit(1)
+
+    manager = TargetManager()
+    success = manager.update_target(identifier, nickname=nickname, notes=notes)
+
+    if success:
+        click.echo(f"✓ Updated target: {identifier}")
+    else:
+        click.echo(f"✗ Target not found: {identifier}", err=True)
+        raise SystemExit(1)
