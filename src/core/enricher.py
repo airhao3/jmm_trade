@@ -123,6 +123,8 @@ class PreFlightResult:
     score: int = 0
     reasons: list[str] = field(default_factory=list)
     skip_reasons: list[str] = field(default_factory=list)
+    skip_simulation: bool = False  # True → don't even run simulator (toxic spread)
+    adverse_momentum: bool = False  # True → OKX price moving against position
 
 
 # ── Enricher ──────────────────────────────────────────────
@@ -193,7 +195,15 @@ class TradeEnricher:
             result.passed = False
             result.skip_reasons.append("Market already settled")
 
-        if orderbook and orderbook.spread_pct > max_spread_pct:
+        # Spread > 10%: hard circuit breaker — skip simulation entirely
+        if orderbook and orderbook.spread_pct > 10.0:
+            result.passed = False
+            result.skip_simulation = True
+            result.skip_reasons.append(
+                f"🔴 SPREAD BREAKER: {orderbook.spread_pct:.1f}% > 10% "
+                f"(untradeable, simulation skipped)"
+            )
+        elif orderbook and orderbook.spread_pct > max_spread_pct:
             result.passed = False
             result.skip_reasons.append(
                 f"Spread {orderbook.spread_pct:.1f}% > {max_spread_pct:.0f}%"
@@ -231,6 +241,14 @@ class TradeEnricher:
             else:
                 result.score -= 1
                 result.reasons.append("⚠️ Momentum against trade")
+
+        # ── Adverse momentum exit trigger (>0.5% against position) ──
+        adverse = self._check_adverse_momentum(trade)
+        if adverse:
+            result.adverse_momentum = True
+            result.reasons.append(
+                "🚨 ADVERSE MOMENTUM: OKX price moving >0.5% against position"
+            )
 
         return result
 
@@ -293,6 +311,47 @@ class TradeEnricher:
                 return 1
 
         return None  # can't determine
+
+    def _check_adverse_momentum(self, trade: dict[str, Any]) -> bool:
+        """Check if OKX price is moving >0.5% AGAINST the trade direction.
+
+        Used to trigger exit/cancel signals for existing positions.
+        Uses a 5-second momentum window for more reliable detection.
+        """
+        if not self._price_feed:
+            return False
+
+        title_upper = (trade.get("title", "")).upper()
+        asset = None
+        if "BITCOIN" in title_upper or "BTC" in title_upper:
+            asset = "BTC"
+        elif "ETHEREUM" in title_upper or "ETH" in title_upper:
+            asset = "ETH"
+        elif "SOLANA" in title_upper or "SOL" in title_upper:
+            asset = "SOL"
+
+        if not asset or not self._price_feed.is_fresh(asset, max_age_s=10):
+            return False
+
+        momentum = self._price_feed.momentum(asset, seconds=5.0)
+        if momentum is None or abs(momentum) < 0.5:
+            return False  # not significant enough
+
+        side = trade.get("side", "BUY")
+        is_up_market = any(
+            kw in title_upper for kw in ["UP", "ABOVE", "HIGHER", "RISE"]
+        )
+        is_down_market = any(
+            kw in title_upper for kw in ["DOWN", "BELOW", "LOWER", "FALL"]
+        )
+
+        # Adverse = bought UP but price falling, or bought DOWN but price rising
+        if side == "BUY":
+            if is_up_market and momentum < -0.5:
+                return True
+            if is_down_market and momentum > 0.5:
+                return True
+        return False
 
     # ── Main enrich ──────────────────────────────────────
 

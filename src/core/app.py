@@ -236,6 +236,7 @@ class Application:
                 logger.exception("Trade enrichment failed, using basic notification")
 
         # ── Pre-flight quality gate ────────────────────────
+        pf = None
         if self.enricher and enriched:
             pf = self.enricher.pre_flight(
                 trade,
@@ -243,6 +244,19 @@ class Application:
                 orderbook=enriched.orderbook,
                 market=enriched.market,
             )
+
+            # Adverse momentum warning (even if trade passes)
+            if pf.adverse_momentum and self.notifier:
+                await self.notifier.notify(
+                    EventType.NEW_TRADE,
+                    {"_rich_message": (
+                        "⚠️ ADVERSE MOMENTUM ALERT\n\n"
+                        f"📊 {enriched.market_title}\n"
+                        f"OKX price moving >0.5% AGAINST this position!\n"
+                        f"Consider exiting or reducing exposure."
+                    )},
+                )
+
             if not pf.passed:
                 logger.info(
                     f"[{target.nickname}] SKIPPED: {', '.join(pf.skip_reasons)} "
@@ -292,7 +306,13 @@ class Application:
                     },
                 )
 
-        # ── Run simulation ─────────────────────────────────
+        # ── Run simulation (skip if toxic spread) ──────────
+        if pf and pf.skip_simulation:
+            logger.info(
+                f"[{target.nickname}] Simulation SKIPPED: spread breaker active "
+                f"| {trade.get('title', '?')[:40]}"
+            )
+            return
         results = await self.simulator.simulate(target, trade)
 
         if self.metrics:

@@ -292,6 +292,24 @@ class PolymarketClient:
         """GET /markets?condition_id= – for volume & liquidity data."""
         return await self.get_market(condition_id)
 
+    # ── Market-level trades (for alpha discovery) ──────
+
+    async def get_market_trades(
+        self,
+        asset_id: str,
+        limit: int = 500,
+    ) -> list[dict]:
+        """GET /trades – fetch ALL trades for a market token (not user-specific).
+
+        Used by alpha discovery to find profitable early entries.
+        """
+        url = f"{self.config.base_urls['data']}/trades"
+        params: dict[str, Any] = {
+            "asset": asset_id,
+            "limit": min(limit, 10000),
+        }
+        return await self._request("GET", url, params=params) or []
+
     # ── Forbidden operations ─────────────────────────────
 
     async def create_order(self, *args: Any, **kwargs: Any) -> None:  # noqa: ARG002
