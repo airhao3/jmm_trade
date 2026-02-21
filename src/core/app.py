@@ -131,7 +131,7 @@ class Application:
                 tasks.append(asyncio.create_task(self.notifier.run(), name="notifier"))
 
             # Metrics
-            if self.config.logging.metrics_enabled:
+            if self.config.logging.files.metrics.enabled:
                 tasks.append(asyncio.create_task(self.metrics.run(), name="metrics"))
 
             # Periodic portfolio log

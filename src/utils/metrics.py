@@ -61,7 +61,7 @@ class MetricsCollector:
 
     async def run(self) -> None:
         """Log metrics at the configured interval."""
-        interval = self.config.metrics_interval
+        interval = self.config.files.metrics.interval
         logger.info(f"Metrics collector started (interval={interval}s)")
         while True:
             await asyncio.sleep(interval)
