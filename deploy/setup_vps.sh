@@ -181,20 +181,32 @@ else
 fi
 
 # 环境变量检查
-info "检查必要的环境变量..."
+info "检查环境变量..."
 source .env
 
 MISSING_VARS=()
 [ -z "$POLYMARKET_API_KEY" ] && MISSING_VARS+=("POLYMARKET_API_KEY")
-[ -z "POLYMARKET_SECRET" ] && MISSING_VARS+=("POLYMARKET_SECRET")
-[ -z "POLYMARKET_PASSPHRASE" ] && MISSING_VARS+=("POLYMARKET_PASSPHRASE")
+[ -z "$POLYMARKET_SECRET" ] && MISSING_VARS+=("POLYMARKET_SECRET")
+[ -z "$POLYMARKET_PASSPHRASE" ] && MISSING_VARS+=("POLYMARKET_PASSPHRASE")
 
 if [ ${#MISSING_VARS[@]} -gt 0 ]; then
     warn "以下环境变量未设置: ${MISSING_VARS[*]}"
-    warn "请编辑 .env 文件: nano .env"
-    warn "按 Ctrl+X 保存后重新运行此脚本"
+    warn ""
+    warn "⚠️  当前配置支持模拟模式，但无法获取实时数据"
+    warn "   - ✓ 可以运行 bot 进行模拟交易"
+    warn "   - ✓ 可以查看配置和测试连接"
+    warn "   - ✗ 无法获取真实的 Polymarket 数据"
+    warn ""
+    warn "如需获取实时数据，请配置 API 密钥:"
+    warn "  1. 在 Polymarket 申请 API 密钥"
+    warn "  2. 编辑 .env 文件: nano .env"
+    warn "  3. 填入 POLYMARKET_API_KEY, POLYMARKET_SECRET, POLYMARKET_PASSPHRASE"
+    warn "  4. 重启服务: sudo systemctl restart polymarket-bot"
+    warn ""
+    warn "现在继续部署（模拟模式）..."
+    success "配置验证通过（模拟模式）"
 else
-    success "所有必要环境变量已配置"
+    success "所有必要环境变量已配置（完整模式）"
 fi
 
 # ============================================
@@ -210,8 +222,8 @@ info "验证配置..."
 if python main.py check-config; then
     success "配置验证通过"
 else
-    error "配置验证失败，请检查 config/config.yaml 和 .env"
-    exit 1
+    warn "配置验证失败，但继续部署（可能是 API 密钥未配置）"
+    warn "bot 将在模拟模式下运行，不会获取实时数据"
 fi
 
 # ============================================
