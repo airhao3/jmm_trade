@@ -44,6 +44,10 @@ class Application:
         self.notifier: NotificationManager | None = None
         self.metrics: MetricsCollector | None = None
 
+        # WebSocket supplementary state
+        self._ws_activity_flag: bool = False
+        self._price_cache: dict[str, float] = {}
+
     # ── Safety ───────────────────────────────────────────
 
     @staticmethod
@@ -259,14 +263,31 @@ class Application:
     # ── Poll loop with metrics sync ──────────────────────
 
     async def _poll_loop_with_metrics(self) -> None:
-        """Wrap monitor.poll_loop to sync counters to metrics."""
+        """Poll REST API /trades to detect new trades from target accounts.
+
+        This is the PRIMARY and ONLY reliable method for detecting trades
+        from specific wallet addresses. Polymarket WebSocket channels do NOT
+        expose per-user trade data:
+          - 'market' channel: orderbook/price changes only
+          - 'user' channel: requires auth, shows only YOUR orders
+          - No public channel shows other users' trades
+
+        The poll loop supports burst mode: when WebSocket detects market
+        activity on a tracked asset, it triggers faster polling.
+        """
         interval = self.config.monitoring.poll_interval
         logger.info(
-            f"Monitor started: polling every {interval}s for "
+            f"Trade monitor started: polling /trades every {interval}s for "
             f"{len(self.config.get_active_targets())} targets"
         )
         while True:
             try:
+                # Use burst interval if WebSocket flagged recent activity
+                current_interval = interval
+                if self._ws_activity_flag:
+                    current_interval = max(1, interval // 2)
+                    self._ws_activity_flag = False
+
                 new_count, latency = await self.monitor.poll_once()
 
                 # Sync to metrics
@@ -294,31 +315,69 @@ class Application:
                 logger.exception("Unhandled error in poll cycle")
                 if self.metrics:
                     self.metrics.increment_failed_requests()
-            await asyncio.sleep(interval)
+            await asyncio.sleep(current_interval)
 
-    # ── WebSocket mode ───────────────────────────────────
+    # ── WebSocket (supplementary) ─────────────────────────
 
     async def _run_websocket(self) -> None:
-        """Start WebSocket-based monitoring (placeholder for future)."""
+        """WebSocket market channel for real-time price data.
+
+        NOTE: This does NOT detect trades. The 'market' channel only provides
+        orderbook/price updates. Trade detection is done by REST API polling.
+
+        Purpose:
+          1. Cache real-time prices for slippage calculation
+          2. Detect market activity to trigger accelerated polling
+        """
         ws = PolymarketWebSocket(self.config.api, channel="market")
 
         async def _handle_ws_message(data: dict[str, Any] | list[Any]) -> None:
             if isinstance(data, list):
-                logger.debug(f"WS message: list with {len(data)} items")
+                for item in data:
+                    if isinstance(item, dict):
+                        await _process_market_event(item)
                 return
-            logger.debug(f"WS message: {data.get('event_type', 'unknown')}")
+            if isinstance(data, dict):
+                await _process_market_event(data)
+
+        async def _process_market_event(event: dict[str, Any]) -> None:
+            event_type = event.get("event_type", "")
+
+            if event_type == "last_trade_price":
+                # A trade happened on this market – trigger faster polling
+                self._ws_activity_flag = True
+                asset_id = event.get("asset_id", "?")
+                price = event.get("price", "?")
+                logger.debug(f"WS market activity: trade @ {price} (asset {str(asset_id)[:12]}...)")
+
+            elif event_type == "price_change":
+                # Cache price for slippage calculation
+                asset_id = event.get("asset_id", "")
+                price = event.get("price")
+                if asset_id and price:
+                    self._price_cache[asset_id] = float(price)
 
         ws.on_message(_handle_ws_message)
 
         # Discover active markets for target accounts
+        subscribed = 0
         for target in self.config.get_active_targets():
             try:
-                positions = await self.api.get_positions(target.address)
-                asset_ids = [p.get("asset", "") for p in positions if p.get("asset")]
+                trades = await self.api.get_trades(target.address, limit=20)
+                asset_ids = list({t.get("asset", "") for t in trades if t.get("asset")})
                 if asset_ids:
                     await ws.subscribe(asset_ids)
+                    subscribed += len(asset_ids)
+                    logger.info(
+                        f"[{target.nickname}] WebSocket tracking {len(asset_ids)} "
+                        f"active markets for price data"
+                    )
             except Exception as exc:
-                logger.warning(f"Failed to load positions for {target.nickname}: {exc}")
+                logger.warning(f"Failed to load markets for {target.nickname}: {exc}")
+
+        if subscribed == 0:
+            logger.warning("WebSocket: no markets to track, falling back to poll-only mode")
+            return
 
         await ws.run()
 
