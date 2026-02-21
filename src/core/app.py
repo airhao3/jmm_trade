@@ -281,7 +281,10 @@ class Application:
         """Start WebSocket-based monitoring (placeholder for future)."""
         ws = PolymarketWebSocket(self.config.api, channel="market")
 
-        async def _handle_ws_message(data: dict[str, Any]) -> None:
+        async def _handle_ws_message(data: dict[str, Any] | list[Any]) -> None:
+            if isinstance(data, list):
+                logger.debug(f"WS message: list with {len(data)} items")
+                return
             logger.debug(f"WS message: {data.get('event_type', 'unknown')}")
 
         ws.on_message(_handle_ws_message)
