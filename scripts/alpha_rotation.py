@@ -29,6 +29,7 @@ from src.api.client import PolymarketClient
 from src.api.rate_limiter import TokenBucketRateLimiter
 from src.config.loader import load_config
 from src.core.profiler import Archetype, SmartMoneyProfiler
+from src.core.shadow import ShadowTracker
 
 TARGETS_PATH = Path("config/targets.json")
 CANDIDATES_PATH = Path("config/candidates.json")
@@ -150,27 +151,37 @@ async def rotate(
     evict = evict[:max_evict]
 
     # Step 2: Try shadow pool first, then discover new alphas
+    shadow_tracker = ShadowTracker(api, profiler)
+    shadow_tracker.load_candidates()
+
     slots_available = max_targets - len(keep)
     new_alphas: list[dict] = []
     tracked_addrs = {t["address"].lower() for t in keep}
 
     if slots_available > 0:
-        # 2a. Promote from shadow pool (proven candidates first)
-        shadow = _load_candidates()
+        # 2a. Promote from shadow pool (verified candidates first)
+        promotable = shadow_tracker.get_promotion_candidates(n=slots_available)
         shadow_promoted = []
-        for s in sorted(shadow, key=lambda x: -x.get("shadow_score", 0)):
+        for sc in promotable:
             if len(new_alphas) >= slots_available:
                 break
-            if s["address"].lower() in tracked_addrs:
+            if sc.address.lower() in tracked_addrs:
                 continue
-            if s.get("shadow_score", 0) >= min_score:
-                new_alphas.append(s)
-                shadow_promoted.append(s["address"])
-                tracked_addrs.add(s["address"].lower())
+            new_alphas.append({
+                "address": sc.address,
+                "archetype": sc.archetype,
+                "rank": f"S{len(shadow_promoted)+1}",
+                "estimated_profit": sc.total_v_profit,
+                "follow_score": int(sc.shadow_score),
+                "win_rate": sc.vWR,
+            })
+            shadow_tracker.promote(sc.address)
+            shadow_promoted.append(sc.address)
+            tracked_addrs.add(sc.address.lower())
 
         if shadow_promoted:
             logger.info(
-                f"\n\u2b06\ufe0f Promoted {len(shadow_promoted)} from shadow pool"
+                f"\n Promoted {len(shadow_promoted)} from shadow pool"
             )
 
         # 2b. Discover fresh alphas for remaining slots
@@ -222,40 +233,23 @@ async def rotate(
     logger.info(f"  Promoted: {summary['promoted']} {summary['promoted_addresses']}")
     logger.info(f"  Total:    {summary['total']}")
 
-    # Step 4: Update shadow pool
-    # - Evicted targets go to shadow for monitoring
-    # - Promoted shadows are removed from candidates
-    # - New discovery results go to shadow if not promoted
-    shadow = _load_candidates()
-    shadow_addrs = {s["address"].lower() for s in shadow}
-
-    # Add evicted to shadow (demote, not delete)
+    # Step 4: Update shadow pool via ShadowTracker
+    # Demote evicted targets back to shadow for re-observation
     for e in evict:
-        if e["address"].lower() not in shadow_addrs:
-            shadow.append({
-                "address": e["address"],
-                "nickname": e.get("nickname", ""),
-                "shadow_score": 0,
-                "added_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                "notes": f"Demoted: {e.get('_evict_reasons', [])}",
-            })
-
-    # Remove promoted from shadow
-    promoted_addrs = {a["address"].lower() for a in new_alphas}
-    shadow = [s for s in shadow if s["address"].lower() not in promoted_addrs]
+        shadow_tracker.demote(e["address"], e.get("nickname", ""))
 
     # Step 5: Write files (unless dry-run)
     if dry_run:
-        logger.info("\n\u26a0\ufe0f DRY RUN \u2014 no changes written")
+        logger.info("\nDRY RUN -- no changes written")
     else:
         _save_targets(new_targets)
-        _save_candidates(shadow)
+        shadow_tracker.save_candidates()
         logger.info(
-            f"\n\u2705 targets.json: {len(new_targets)} targets, "
-            f"candidates.json: {len(shadow)} in shadow pool"
+            f"\ntargets.json: {len(new_targets)} targets, "
+            f"candidates.json: {shadow_tracker.candidate_count} in shadow pool"
         )
 
-    summary["shadow_pool_size"] = len(shadow)
+    summary["shadow_pool_size"] = shadow_tracker.candidate_count
 
     # Log rotation
     _log_rotation(summary)

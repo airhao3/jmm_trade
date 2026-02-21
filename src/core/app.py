@@ -21,6 +21,7 @@ from src.core.portfolio import Portfolio
 from src.core.profiler import SmartMoneyProfiler
 from src.core.risk_manager import RiskManager, TradeSignal, format_risk_verdict
 from src.core.settlement import SettlementEngine
+from src.core.shadow import ShadowTracker
 from src.core.simulator import TradeSimulator
 from src.core.sizing import compute_position_size, format_sizing_summary
 from src.data.database import Database
@@ -63,6 +64,7 @@ class Application:
         self.price_feed: PriceFeed | None = None
         self.profiler: SmartMoneyProfiler | None = None
         self.risk_manager: RiskManager = RiskManager()
+        self.shadow_tracker: ShadowTracker | None = None
 
     # ── Safety ───────────────────────────────────────────
 
@@ -155,6 +157,9 @@ class Application:
                 self.telegram_bot = TelegramBotHandler(self.config.notifications.telegram)
                 await self.telegram_bot.start()
 
+            # ── Shadow tracker (silent candidate monitoring) ──
+            self.shadow_tracker = ShadowTracker(api, self.profiler)
+
             # ── Wire monitor -> simulator -> notifier ────
             self.monitor.on_new_trade(self._on_new_trade)
 
@@ -196,6 +201,11 @@ class Application:
             # Auto CSV export
             if self.config.export.enabled:
                 tasks.append(asyncio.create_task(self._periodic_export(), name="csv_export"))
+
+            # Shadow tracking (silent candidate pool)
+            tasks.append(
+                asyncio.create_task(self.shadow_tracker.run(), name="shadow_track")
+            )
 
             logger.info(f"Launched {len(tasks)} background tasks")
 
