@@ -43,16 +43,118 @@
 
 ## 2. 手动部署（首次）
 
-### 2.1 连接 VPS
+### 2.1 初始连接和用户配置
+
+#### 首次以 root 登录
 
 ```bash
-# SSH 连接（替换为你的 VPS IP）
+# SSH 连接到 VPS（首次使用 root）
 ssh root@YOUR_VPS_IP
 
-# 创建非 root 用户（推荐）
+# 如果 VPS 提供商给了密码，首次登录后建议修改
+passwd
+```
+
+#### 创建专用用户（强烈推荐）
+
+为安全起见，不要直接使用 root 用户运行应用。创建专用用户：
+
+```bash
+# 创建新用户 trader（可自定义用户名）
 adduser trader
+
+# 提示输入密码和用户信息，按提示操作：
+#   New password: ******
+#   Retype new password: ******
+#   Full Name []: Polymarket Trader
+#   其他信息可直接回车跳过
+
+# 将用户添加到 sudo 组（获得管理员权限）
 usermod -aG sudo trader
+
+# 验证用户已添加到 sudo 组
+groups trader
+# 应该看到: trader : trader sudo
+```
+
+#### 配置 SSH 密钥登录（推荐）
+
+**在本地机器上**:
+
+```bash
+# 生成 SSH 密钥对（如果还没有）
+ssh-keygen -t ed25519 -C "your_email@example.com"
+
+# 查看公钥
+cat ~/.ssh/id_ed25519.pub
+# 复制输出内容
+```
+
+**在 VPS 上（以 trader 用户）**:
+
+```bash
+# 切换到新创建的用户
 su - trader
+
+# 创建 .ssh 目录
+mkdir -p ~/.ssh
+chmod 700 ~/.ssh
+
+# 添加公钥
+nano ~/.ssh/authorized_keys
+# 粘贴刚才复制的公钥内容，保存（Ctrl+O, Enter, Ctrl+X）
+
+# 设置正确权限
+chmod 600 ~/.ssh/authorized_keys
+
+# 退出到 root
+exit
+```
+
+**测试 SSH 密钥登录**:
+
+```bash
+# 在本地机器测试（新开一个终端窗口，不要关闭当前连接）
+ssh trader@YOUR_VPS_IP
+
+# 应该能无密码直接登录
+# 如果成功，可以禁用 root SSH 登录（可选，更安全）
+```
+
+#### 禁用 root SSH 登录（可选，推荐）
+
+确认 trader 用户可以正常登录后：
+
+```bash
+# 以 trader 用户登录 VPS
+ssh trader@YOUR_VPS_IP
+
+# 编辑 SSH 配置
+sudo nano /etc/ssh/sshd_config
+
+# 找到并修改以下行:
+#   PermitRootLogin yes
+# 改为:
+#   PermitRootLogin no
+
+# 保存并重启 SSH 服务
+sudo systemctl restart sshd
+
+# 注意：确保 trader 用户能正常登录后再执行此步骤！
+```
+
+#### 切换到工作用户
+
+```bash
+# 如果当前是 root，切换到 trader
+su - trader
+
+# 或直接以 trader 登录
+ssh trader@YOUR_VPS_IP
+
+# 验证当前用户
+whoami
+# 应该显示: trader
 ```
 
 ### 2.2 安装依赖
@@ -167,22 +269,119 @@ WantedBy=multi-user.target
 # 创建日志目录
 mkdir -p logs
 
-# 重载 systemd
+# 重载 systemd（让系统识别新服务）
 sudo systemctl daemon-reload
 
 # 启动服务
 sudo systemctl start polymarket-bot
 
-# 设置开机自启
+# 设置开机自启（重启 VPS 后自动运行）
 sudo systemctl enable polymarket-bot
 
-# 查看状态
+# 查看服务状态
 sudo systemctl status polymarket-bot
 
-# 查看日志
+# 应该看到:
+# ● polymarket-bot.service - Polymarket Copy Trading Bot
+#    Loaded: loaded (/etc/systemd/system/polymarket-bot.service; enabled)
+#    Active: active (running) since ...
+#    Main PID: 12345 (python)
+#    ...
+```
+
+### 2.7 验证服务运行
+
+#### 检查服务状态
+
+```bash
+# 查看服务是否运行
+sudo systemctl is-active polymarket-bot
+# 应该输出: active
+
+# 查看服务是否开机自启
+sudo systemctl is-enabled polymarket-bot
+# 应该输出: enabled
+
+# 查看详细状态
+sudo systemctl status polymarket-bot
+```
+
+#### 查看日志
+
+```bash
+# 实时查看 systemd 日志
 journalctl -u polymarket-bot -f
-# 或
-tail -f logs/bot.log
+
+# 查看最近 50 行日志
+journalctl -u polymarket-bot -n 50 --no-pager
+
+# 查看文件日志
+tail -f ~/jmm_trade/logs/bot.log
+
+# 查看错误日志
+tail -f ~/jmm_trade/logs/bot.error.log
+
+# 应该看到类似输出:
+# [INFO] Application starting in READ_ONLY mode
+# [INFO] Monitoring 1 target accounts
+# [INFO] Poll mode enabled (interval: 1s)
+# [INFO] Starting poll loop...
+# [INFO] Poll #1: 0 new trades discovered (latency: 52ms)
+```
+
+#### 验证进程
+
+```bash
+# 查看 Python 进程
+ps aux | grep "main.py"
+
+# 查看资源使用
+top -p $(pgrep -f "main.py")
+
+# 应该看到进程在运行，CPU < 5%, 内存 ~50MB
+```
+
+#### 测试 API 连接
+
+```bash
+cd ~/jmm_trade
+source .venv/bin/activate
+
+# 运行配置检查
+python main.py check-config
+
+# 运行本地 E2E 测试（验证 API 连接）
+python tests/test_e2e_local.py
+
+# 应该看到 API 延迟约 50-70ms（US East VPS）
+```
+
+### 2.8 常用服务管理命令
+
+```bash
+# 启动服务
+sudo systemctl start polymarket-bot
+
+# 停止服务
+sudo systemctl stop polymarket-bot
+
+# 重启服务
+sudo systemctl restart polymarket-bot
+
+# 重新加载配置（修改 .env 后）
+sudo systemctl restart polymarket-bot
+
+# 查看服务状态
+sudo systemctl status polymarket-bot
+
+# 查看实时日志
+journalctl -u polymarket-bot -f
+
+# 禁用开机自启
+sudo systemctl disable polymarket-bot
+
+# 启用开机自启
+sudo systemctl enable polymarket-bot
 ```
 
 ---
