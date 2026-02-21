@@ -29,10 +29,11 @@ from src.config.models import TargetAccount
 class Archetype(StrEnum):
     """Behavioral archetype for a tracked address."""
 
-    SNIPER = "SNIPER"      # Low freq, large size, high WR → follow aggressively
-    WHALE = "WHALE"        # Large size, medium freq → follow with caution
-    SCALPER = "SCALPER"    # High freq, small size → likely market maker, ignore
-    NOISE = "NOISE"        # Low volume, poor WR → skip entirely
+    SNIPER = "SNIPER"                # Low freq, large size, high WR → follow aggressively
+    POTENTIAL_SNIPER = "POT_SNIPER"  # High score but doesn't fit strict SNIPER template
+    WHALE = "WHALE"                  # Large size, medium freq → follow with caution
+    SCALPER = "SCALPER"              # High freq, small size → likely market maker, ignore
+    NOISE = "NOISE"                  # Low volume, poor WR → skip entirely
     UNKNOWN = "UNKNOWN"
 
 
@@ -197,12 +198,22 @@ class SmartMoneyProfiler:
         """Classify into archetype based on behavioral signals."""
         # SNIPER: low frequency, large trades, high win rate
         if (
-            p.trades_per_hour < 2
-            and p.avg_trade_usd > 200
+            p.trades_per_hour < 5
+            and p.avg_trade_usd > 100
             and p.win_rate > 55
             and p.unique_markets >= 3
         ):
             return Archetype.SNIPER
+
+        # POTENTIAL_SNIPER: high score signals that don't fit strict SNIPER
+        # (e.g. high WR + accumulation pattern, or high profit but mixed frequency)
+        if (
+            p.win_rate > 50
+            and (p.accumulation_score > 0.4 or p.avg_trade_usd > 80)
+            and p.wash_trade_score < 0.5
+            and p.unique_markets >= 3
+        ):
+            return Archetype.POTENTIAL_SNIPER
 
         # WHALE: large trades, medium frequency
         if p.avg_trade_usd > 500 and p.total_trades >= 20:
@@ -247,6 +258,9 @@ class SmartMoneyProfiler:
         if p.archetype == Archetype.SNIPER:
             score += 2
             reasons.append("Sniper pattern")
+        elif p.archetype == Archetype.POTENTIAL_SNIPER:
+            score += 1
+            reasons.append("🎯 Potential sniper")
         elif p.archetype == Archetype.SCALPER:
             score -= 3
             reasons.append("Scalper/MM pattern")
@@ -437,6 +451,7 @@ class SmartMoneyProfiler:
         """
         intervals = {
             Archetype.SNIPER: 0.5,
+            Archetype.POTENTIAL_SNIPER: 0.5,
             Archetype.WHALE: 1.0,
             Archetype.UNKNOWN: 2.0,
             Archetype.SCALPER: 5.0,

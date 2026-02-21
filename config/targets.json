@@ -1,11 +1,46 @@
 {
   "targets": [
     {
+      "address": "0xc7ed9805c6354c0a1955215e7705647fc0506c8b",
+      "nickname": "Alpha_1_WHALE",
+      "enabled": true,
+      "added_at": "2026-02-22T05:44:00Z",
+      "notes": "Alpha discovery: $130K profit, entry@$0.001, WHALE score=6/10, WR=45%"
+    },
+    {
+      "address": "0x9d704030aa499de3171767fd39b828126641fdd9",
+      "nickname": "Alpha_2_ACCUM",
+      "enabled": true,
+      "added_at": "2026-02-22T05:44:00Z",
+      "notes": "Alpha discovery: $26K profit, entry@$0.04, score=8/10, WR=59%, accum=0.66 (drip-buyer)"
+    },
+    {
+      "address": "0x5a35dca0f39434598f4185821e7d0ee287c0fc8e",
+      "nickname": "Alpha_3_SHARP",
+      "enabled": true,
+      "added_at": "2026-02-22T05:44:00Z",
+      "notes": "Alpha discovery: $16.7K profit, entry@$0.029, score=8/10, WR=67.5%"
+    },
+    {
+      "address": "0x70a223af347a94e2dcde44fb8d0ff9d8c6ef6abe",
+      "nickname": "Alpha_4_PERFECT",
+      "enabled": true,
+      "added_at": "2026-02-22T05:44:00Z",
+      "notes": "Alpha discovery: $15.9K profit, entry@$0.12, score=7/10, WR=100%"
+    },
+    {
+      "address": "0x204f72f35326db932158cba6adff0b9a1da95e14",
+      "nickname": "Alpha_5_HUNTER",
+      "enabled": true,
+      "added_at": "2026-02-22T05:44:00Z",
+      "notes": "Alpha discovery: $15.3K profit, entry@$0.26, score=8/10, accum=0.46"
+    },
+    {
       "address": "0x88f46b9e5d86b4fb85be55ab0ec4004264b9d4db",
-      "nickname": "PBot1",
+      "nickname": "PBot1_REF",
       "enabled": true,
       "added_at": "2026-02-22T03:47:00Z",
-      "notes": "Primary target - high volume trader"
+      "notes": "NEGATIVE REFERENCE: NOISE score=0/10, WR=38%, wash=0.33. Keep for baseline comparison."
     }
   ]
 }
