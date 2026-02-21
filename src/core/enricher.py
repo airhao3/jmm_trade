@@ -19,6 +19,7 @@ import aiohttp
 from loguru import logger
 
 from src.api.client import PolymarketClient
+from src.api.price_feed import PriceFeed
 from src.config.models import TargetAccount
 
 # ── Data models ──────────────────────────────────────────
@@ -145,9 +146,11 @@ class TradeEnricher:
         self,
         api: PolymarketClient,
         ws_price_cache: dict[str, float] | None = None,
+        price_feed: PriceFeed | None = None,
     ) -> None:
         self.api = api
         self._ws_prices = ws_price_cache or {}
+        self._price_feed = price_feed  # OKX real-time prices
 
         # Caches
         self._profile_cache: dict[str, WhaleProfile] = {}
@@ -166,9 +169,11 @@ class TradeEnricher:
         min_usd: float = 100.0,
         max_spread_pct: float = 5.0,
     ) -> PreFlightResult:
-        """Quick quality gate before full enrichment/notification.
+        """Quality gate with momentum correlation scoring.
 
-        Returns PreFlightResult with pass/fail and score.
+        Hard filters gate entry; scoring measures signal strength.
+        Momentum correlation: if external price moved >0.1% in 1s in
+        the same direction as the whale's trade, score gets a bonus.
         """
         result = PreFlightResult()
         price = float(trade.get("price", 0))
@@ -217,7 +222,77 @@ class TradeEnricher:
             result.score += 1
             result.reasons.append("Tight spread")
 
+        # ── Momentum correlation (OKX real-time) ──
+        corr = self._check_momentum_correlation(trade)
+        if corr is not None:
+            if corr > 0:
+                result.score += 2
+                result.reasons.append("✅ Momentum aligned with trade")
+            else:
+                result.score -= 1
+                result.reasons.append("⚠️ Momentum against trade")
+
         return result
+
+    def _check_momentum_correlation(
+        self, trade: dict[str, Any]
+    ) -> int | None:
+        """Check if external price momentum aligns with trade direction.
+
+        Returns:
+          +1 if momentum aligns (e.g. BTC rising + whale buys YES on BTC up)
+          -1 if momentum opposes
+          None if no data available
+        """
+        if not self._price_feed:
+            return None
+
+        title_upper = (trade.get("title", "")).upper()
+        asset = None
+        if "BITCOIN" in title_upper or "BTC" in title_upper:
+            asset = "BTC"
+        elif "ETHEREUM" in title_upper or "ETH" in title_upper:
+            asset = "ETH"
+        elif "SOLANA" in title_upper or "SOL" in title_upper:
+            asset = "SOL"
+
+        if not asset or not self._price_feed.is_fresh(asset, max_age_s=10):
+            return None
+
+        momentum = self._price_feed.momentum(asset, seconds=1.0)
+        if momentum is None or abs(momentum) < 0.1:
+            return None  # not significant
+
+        # Determine expected direction from market title
+        side = trade.get("side", "BUY")
+        is_up_market = any(
+            kw in title_upper
+            for kw in ["UP", "ABOVE", "HIGHER", "RISE"]
+        )
+        is_down_market = any(
+            kw in title_upper
+            for kw in ["DOWN", "BELOW", "LOWER", "FALL"]
+        )
+
+        # BUY on "Up" market + price rising = aligned
+        # BUY on "Down" market + price falling = aligned
+        if side == "BUY":
+            if is_up_market and momentum > 0:
+                return 1
+            if is_down_market and momentum < 0:
+                return 1
+            if is_up_market and momentum < 0:
+                return -1
+            if is_down_market and momentum > 0:
+                return -1
+        elif side == "SELL":
+            # SELL on "Up" market + price falling = aligned
+            if is_up_market and momentum < 0:
+                return 1
+            if is_down_market and momentum > 0:
+                return 1
+
+        return None  # can't determine
 
     # ── Main enrich ──────────────────────────────────────
 
@@ -274,6 +349,8 @@ class TradeEnricher:
             elif key == "external" and result:
                 enriched.external_price = result.get("price")
                 enriched.external_source = result.get("source", "")
+                if result.get("momentum_1s") is not None:
+                    enriched.raw_trade["_ext_momentum_1s"] = result["momentum_1s"]
 
         # ── Derive profile + position from shared trades data (zero API) ──
         enriched.whale = self._build_profile(target, trades_data)
@@ -504,13 +581,13 @@ class TradeEnricher:
             self._market_cache[cache_key] = (time.monotonic(), ctx)
         return ctx
 
-    # ── External price (TTL cached) ──────────────────────
+    # ── External price (PriceFeed → CoinGecko fallback) ──
 
     async def _fetch_external_cached(
         self,
         market_title: str,
     ) -> dict | None:
-        """Fetch external price with 60s TTL cache."""
+        """Get external price: OKX WSS (instant) → CoinGecko REST (fallback)."""
         title_upper = market_title.upper()
         asset = None
         if "BITCOIN" in title_upper or "BTC" in title_upper:
@@ -523,11 +600,24 @@ class TradeEnricher:
         if not asset:
             return None
 
-        # Check cache
+        # ── Priority 1: OKX WebSocket (ms-level, zero latency) ──
+        if self._price_feed and self._price_feed.is_fresh(asset, max_age_s=10):
+            price = self._price_feed.get(asset)
+            if price and price > 0:
+                momentum = self._price_feed.momentum(asset, seconds=1.0)
+                return {
+                    "price": price,
+                    "source": "OKX",
+                    "symbol": f"{asset}/USDT",
+                    "momentum_1s": momentum,
+                }
+
+        # ── Priority 2: TTL cache ──
         cached = self._ext_price_cache.get(asset)
         if cached and (time.monotonic() - cached[0]) < self.EXT_PRICE_CACHE_TTL:
             return cached[1]
 
+        # ── Priority 3: CoinGecko REST (slow fallback) ──
         cg_ids = {"BTC": "bitcoin", "ETH": "ethereum", "SOL": "solana"}
         cg_id = cg_ids.get(asset)
         if not cg_id:

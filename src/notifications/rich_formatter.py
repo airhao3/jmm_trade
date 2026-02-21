@@ -107,11 +107,20 @@ def format_rich_trade_alert(trade: EnrichedTrade) -> str:
 
     # ── Layer 3: Cross-Market Reference ────────────────────
     if trade.external_price and trade.external_source:
+        is_live = trade.external_source == "OKX"
+        source_label = "⚡ OKX (实时)" if is_live else trade.external_source
         sections.append("📡 外部参考:")
         sections.append(
-            f"  • {trade.external_source}: "
+            f"  • {source_label}: "
             f"${trade.external_price:,.2f}"
         )
+        # Show 1s momentum if available from raw_trade enrichment
+        raw_ext = trade.raw_trade.get("_ext_momentum_1s")
+        if raw_ext is not None:
+            arrow = "📈" if raw_ext > 0 else "📉"
+            sections.append(
+                f"  • {arrow} 1秒动量: {raw_ext:+.3f}%"
+            )
         if trade.premium_pct is not None:
             direction = "溢价" if trade.premium_pct > 0 else "折价"
             sections.append(

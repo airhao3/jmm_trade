@@ -10,6 +10,7 @@ from typing import Any
 from loguru import logger
 
 from src.api.client import PolymarketClient
+from src.api.price_feed import PriceFeed
 from src.api.rate_limiter import TokenBucketRateLimiter
 from src.api.websocket import PolymarketWebSocket
 from src.config.models import AppConfig, TargetAccount
@@ -17,6 +18,7 @@ from src.core.alerts import AlertEngine, format_arbitrage_alert, format_momentum
 from src.core.enricher import TradeEnricher
 from src.core.monitor import TradeMonitor
 from src.core.portfolio import Portfolio
+from src.core.profiler import SmartMoneyProfiler
 from src.core.settlement import SettlementEngine
 from src.core.simulator import TradeSimulator
 from src.data.database import Database
@@ -54,6 +56,8 @@ class Application:
         # Trade enricher & alert engine (initialised in run())
         self.enricher: TradeEnricher | None = None
         self.alert_engine: AlertEngine | None = None
+        self.price_feed: PriceFeed | None = None
+        self.profiler: SmartMoneyProfiler | None = None
 
     # ── Safety ───────────────────────────────────────────
 
@@ -105,12 +109,28 @@ class Application:
             # ── Startup connectivity test ────────────────
             await self._startup_connectivity_test(api)
 
+            # ── Real-time price feed (OKX WSS) ────────────
+            self.price_feed = PriceFeed(symbols=["BTC", "ETH", "SOL"])
+
             # ── Core components ──────────────────────────
             self.monitor = TradeMonitor(self.config, api)
             self.simulator = TradeSimulator(self.config, api, self.db)
             self.settlement = SettlementEngine(self.config, api, self.db)
             self.portfolio = Portfolio(self.db)
-            self.enricher = TradeEnricher(api, ws_price_cache=self._price_cache)
+            self.profiler = SmartMoneyProfiler(api)
+            self.enricher = TradeEnricher(
+                api,
+                ws_price_cache=self._price_cache,
+                price_feed=self.price_feed,
+            )
+
+            # ── Startup target profiling ──────────────────
+            for target in self.config.get_active_targets():
+                profile = await self.profiler.profile(target)
+                logger.info(
+                    f"  [{target.nickname}] {profile.archetype.value} "
+                    f"(follow={profile.follow_score}/10: {profile.follow_reason})"
+                )
 
             # ── Alert engine ──────────────────────────────
             self.alert_engine = AlertEngine(api)
@@ -135,6 +155,9 @@ class Application:
 
             # ── Launch concurrent tasks ──────────────────
             tasks = []
+
+            # Real-time price feed (OKX WSS)
+            tasks.append(self.price_feed.start())
 
             # Monitoring: always run poll loop for trade detection
             tasks.append(asyncio.create_task(self._poll_loop_with_metrics(), name="poll_loop"))
@@ -179,6 +202,8 @@ class Application:
                 for t in tasks:
                     if not t.done():
                         t.cancel()
+                if self.price_feed:
+                    await self.price_feed.stop()
                 if self.telegram_bot:
                     await self.telegram_bot.stop()
                 if self.notifier:
