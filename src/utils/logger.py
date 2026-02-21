@@ -9,7 +9,6 @@ from loguru import logger
 
 from src.config.models import LoggingConfig
 
-
 # Global dashboard instance (set by application)
 _dashboard = None
 

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
@@ -39,7 +39,7 @@ class DashboardIntegration:
     ) -> None:
         """Update system status section."""
         updates = {"uptime": self._format_uptime()}
-        
+
         if mode is not None:
             updates["mode"] = mode
         if investment is not None:
@@ -56,7 +56,7 @@ class DashboardIntegration:
             updates["api_latency"] = api_latency
         if rating is not None:
             updates["rating"] = rating
-            
+
         self.dashboard.update_system_status(**updates)
 
     def update_dashboard_stats(
@@ -75,7 +75,7 @@ class DashboardIntegration:
     ) -> None:
         """Update dashboard statistics."""
         updates = {"uptime": self._format_uptime()}
-        
+
         if total_trades is not None:
             updates["total_trades"] = total_trades
         if open_positions is not None:
@@ -98,7 +98,7 @@ class DashboardIntegration:
             updates["telegram_status"] = telegram_status
         if database_status is not None:
             updates["database_status"] = database_status
-            
+
         self.dashboard.update_dashboard(**updates)
 
     def add_trade_event(
@@ -191,7 +191,7 @@ class DashboardIntegration:
             try:
                 # Get stats from database
                 stats = await db.get_statistics() if db else {}
-                
+
                 # Update dashboard
                 self.update_dashboard_stats(
                     total_trades=stats.get("total_trades", 0),
@@ -203,8 +203,8 @@ class DashboardIntegration:
                     api_latency=metrics.avg_api_latency if metrics else 0.0,
                     failed_requests=metrics.failed_requests if metrics else 0,
                 )
-                
+
             except Exception as e:
                 logger.debug(f"Dashboard stats update failed: {e}")
-                
+
             await asyncio.sleep(interval)

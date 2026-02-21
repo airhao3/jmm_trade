@@ -23,16 +23,16 @@ if TYPE_CHECKING:
 
 async def run_with_dashboard(config: AppConfig) -> None:
     """Run the application with live dashboard if enabled."""
-    
+
     # Check if live dashboard mode is enabled
     if config.logging.console.enabled and config.logging.console.mode == "live":
         # Create dashboard
         dashboard = LiveDashboard(config.logging.console)
         dashboard_integration = DashboardIntegration(dashboard)
-        
+
         # Set global dashboard for logger
         set_dashboard(dashboard)
-        
+
         # Initialize dashboard with startup info
         dashboard_integration.log_system_event("Bot initialization started")
         dashboard_integration.update_system_status(
@@ -43,16 +43,16 @@ async def run_with_dashboard(config: AppConfig) -> None:
             websocket="Connecting...",
             telegram="Initializing...",
         )
-        
+
         # Create stop event for dashboard
         stop_event = asyncio.Event()
-        
+
         # Create application
         app = Application(config)
-        
+
         # Patch application to integrate with dashboard
         _patch_application_with_dashboard(app, dashboard_integration)
-        
+
         # Run dashboard and application concurrently
         try:
             await asyncio.gather(
@@ -75,23 +75,23 @@ async def run_with_dashboard(config: AppConfig) -> None:
 
 def _patch_application_with_dashboard(app: Application, integration: DashboardIntegration) -> None:
     """Patch application methods to integrate with dashboard.
-    
+
     This is a temporary solution until we refactor the Application class
     to natively support dashboard integration.
     """
     # Store original methods
     original_run = app.run
-    
+
     async def patched_run():
         """Patched run method with dashboard integration."""
         # Update dashboard during startup
         integration.log_system_event("Database connecting...")
-        
+
         # Call original run
         await original_run()
-    
+
     # Replace method
     app.run = patched_run
-    
+
     # Store integration for later use
     app._dashboard_integration = integration  # type: ignore
