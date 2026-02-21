@@ -135,21 +135,31 @@ def stats(ctx: click.Context, target: str | None) -> None:
             acct_stats = await db.get_statistics()
             summary = await db.get_pnl_summary(target)
 
+            s = acct_stats
+            success_rate = (
+                (s.total_trades - s.failed_trades) / s.total_trades * 100
+                if s.total_trades > 0 else 0
+            )
+
             click.echo("")
-            click.echo("=" * 50)
+            click.echo("=" * 55)
             click.echo("  POLYMARKET COPY TRADER – STATISTICS")
-            click.echo("=" * 50)
-            click.echo(f"  Total Trades:     {acct_stats.total_trades}")
-            click.echo(f"  Open Positions:   {acct_stats.open_positions}")
-            click.echo(f"  Settled:          {acct_stats.settled_trades}")
-            click.echo(f"  Failed:           {acct_stats.failed_trades}")
-            click.echo(f"  Total PnL:        ${acct_stats.total_pnl:+.2f}")
-            click.echo(f"  Win Rate:         {acct_stats.win_rate:.1f}%")
-            click.echo(f"  Avg Slippage:     {acct_stats.avg_slippage:.2f}%")
-            click.echo(f"  Avg Fee:          ${acct_stats.avg_fee:.2f}")
-            click.echo(f"  Total Invested:   ${acct_stats.total_investment:.2f}")
-            click.echo(f"  Best Trade:       ${acct_stats.best_trade_pnl:+.2f}")
-            click.echo(f"  Worst Trade:      ${acct_stats.worst_trade_pnl:+.2f}")
+            click.echo("=" * 55)
+            click.echo(f"  Total Trades:     {s.total_trades}")
+            click.echo(f"  Open Positions:   {s.open_positions}")
+            click.echo(f"  Settled:          {s.settled_trades}")
+            click.echo(f"  Failed:           {s.failed_trades}")
+            click.echo(f"  Success Rate:     {success_rate:.1f}%")
+            click.echo(f"  Avg Slippage:     {s.avg_slippage:.2f}%")
+            click.echo(f"  Avg Fee:          ${s.avg_fee:.2f}")
+            click.echo("")
+            click.echo("  --- PnL (settled trades only) ---")
+            click.echo(f"  Total PnL:        ${s.total_pnl:+.2f}")
+            click.echo(f"  Win Rate:         {s.win_rate:.1f}%")
+            click.echo(f"  Invested (open):  ${s.total_investment:.2f}")
+            click.echo(f"  Simulated (all):  ${s.total_simulated:.2f}")
+            click.echo(f"  Best Trade:       ${s.best_trade_pnl:+.2f}")
+            click.echo(f"  Worst Trade:      ${s.worst_trade_pnl:+.2f}")
 
             if summary:
                 click.echo("")

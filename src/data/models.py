@@ -108,5 +108,6 @@ class AccountStats:
     avg_slippage: float = 0.0
     avg_fee: float = 0.0
     total_investment: float = 0.0
+    total_simulated: float = 0.0
     best_trade_pnl: float = 0.0
     worst_trade_pnl: float = 0.0

@@ -105,6 +105,13 @@ class PolymarketClient:
                         await asyncio.sleep(retry_after)
                         continue
 
+                    # Don't retry client errors (4xx except 429) — they're permanent
+                    if 400 <= resp.status < 500:
+                        logger.debug(
+                            f"[{method}] {url} -> {resp.status} (no retry)"
+                        )
+                        return None
+
                     resp.raise_for_status()
                     data = await resp.json()
                     logger.debug(
@@ -152,7 +159,7 @@ class PolymarketClient:
         }
         if side:
             params["side"] = side
-        return await self._request("GET", url, params=params)
+        return await self._request("GET", url, params=params) or []
 
     async def get_activity(
         self,
@@ -167,13 +174,13 @@ class PolymarketClient:
             "limit": min(limit, 500),
             "type": activity_type,
         }
-        return await self._request("GET", url, params=params)
+        return await self._request("GET", url, params=params) or []
 
     async def get_positions(self, user_address: str) -> List[Dict]:
         """GET /positions – current open positions for a user."""
         url = f"{self.config.base_urls['data']}/positions"
         params = {"user": user_address}
-        return await self._request("GET", url, params=params)
+        return await self._request("GET", url, params=params) or []
 
     # ── CLOB API ─────────────────────────────────────────
 
@@ -181,7 +188,7 @@ class PolymarketClient:
         """GET /book – order book for a specific token."""
         url = f"{self.config.base_urls['clob']}/book"
         params = {"token_id": token_id}
-        return await self._request("GET", url, params=params)
+        return await self._request("GET", url, params=params) or {"asks": [], "bids": []}
 
     async def get_price(self, token_id: str) -> Dict:
         """GET /price – current price for a token."""
@@ -220,6 +227,8 @@ class PolymarketClient:
         """GET /markets?condition_id= – market metadata."""
         url = f"{self.config.base_urls['gamma']}/markets"
         data = await self._request("GET", url, params={"condition_id": condition_id})
+        if data is None:
+            return {}
         if isinstance(data, list):
             return data[0] if data else {}
         return data
@@ -228,6 +237,8 @@ class PolymarketClient:
         """GET /events?id= – event metadata."""
         url = f"{self.config.base_urls['gamma']}/events"
         data = await self._request("GET", url, params={"id": event_id})
+        if data is None:
+            return {}
         if isinstance(data, list):
             return data[0] if data else {}
         return data

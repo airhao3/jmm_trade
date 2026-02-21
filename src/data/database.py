@@ -397,7 +397,7 @@ class Database:
             stats.win_rate = row["wr"]
 
         async with self._db.execute(
-            "SELECT COALESCE(AVG(ABS(slippage_pct)), 0) as a FROM sim_trades WHERE sim_success = 1"
+            "SELECT COALESCE(AVG(ABS(slippage_pct)), 0) as a FROM sim_trades WHERE slippage_pct IS NOT NULL"
         ) as cur:
             row = await cur.fetchone()
             stats.avg_slippage = row["a"]
@@ -413,6 +413,12 @@ class Database:
         ) as cur:
             row = await cur.fetchone()
             stats.total_investment = row["s"]
+
+        async with self._db.execute(
+            "SELECT COALESCE(SUM(sim_investment), 0) as s FROM sim_trades"
+        ) as cur:
+            row = await cur.fetchone()
+            stats.total_simulated = row["s"]
 
         async with self._db.execute(
             "SELECT COALESCE(MAX(pnl), 0) as m FROM sim_trades WHERE status = 'SETTLED'"
