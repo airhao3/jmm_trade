@@ -22,6 +22,7 @@ from src.data.export import export_trades_to_csv
 from src.notifications.imessage import IMessageNotifier
 from src.notifications.manager import EventType, NotificationManager
 from src.notifications.telegram import TelegramNotifier
+from src.utils.latency import LatencyChecker
 from src.utils.metrics import MetricsCollector
 
 
@@ -85,6 +86,9 @@ class Application:
 
             # ── Wire API latency -> metrics ──────────────
             api.set_latency_callback(self.metrics.record_api_latency)
+
+            # ── Network latency assessment ───────────────
+            await self._assess_network_latency()
 
             # ── Startup connectivity test ────────────────
             await self._startup_connectivity_test(api)
@@ -200,6 +204,13 @@ class Application:
                     )
 
     # ── Startup check ────────────────────────────────────
+
+    async def _assess_network_latency(self) -> None:
+        """Assess network latency to Polymarket APIs and determine copy trading viability."""
+        logger.info("Assessing network latency to Polymarket APIs...")
+        checker = LatencyChecker(timeout=10)
+        results = await checker.check_polymarket_apis()
+        checker.log_summary(results)
 
     async def _startup_connectivity_test(self, api: PolymarketClient) -> None:
         """Test API connectivity and log latency before starting."""
