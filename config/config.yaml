@@ -70,7 +70,7 @@ notifications:
   max_retries: 3
   retry_backoff: [1, 2, 4]   # exponential backoff seconds
   telegram:
-    enabled: false
+    enabled: true
     bot_token: "${TELEGRAM_BOT_TOKEN}"
     chat_id: "${TELEGRAM_CHAT_ID}"
     rate_limit: 20
