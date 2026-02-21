@@ -22,6 +22,7 @@ from src.data.export import export_trades_to_csv
 from src.notifications.imessage import IMessageNotifier
 from src.notifications.manager import EventType, NotificationManager
 from src.notifications.telegram import TelegramNotifier
+from src.notifications.telegram_bot import TelegramBotHandler
 from src.utils.latency import LatencyChecker
 from src.utils.metrics import MetricsCollector
 
@@ -106,16 +107,23 @@ class Application:
             if self.config.notifications.imessage.enabled:
                 self.notifier.register_channel(IMessageNotifier(self.config.notifications.imessage))
 
+            # ── Telegram Bot commands ─────────────────
+            self.telegram_bot: TelegramBotHandler | None = None
+            if self.config.notifications.telegram.enabled:
+                self.telegram_bot = TelegramBotHandler(self.config.notifications.telegram)
+                await self.telegram_bot.start()
+
             # ── Wire monitor -> simulator -> notifier ────
             self.monitor.on_new_trade(self._on_new_trade)
 
             # ── Launch concurrent tasks ──────────────────
             tasks = []
 
-            # Monitoring (with metrics sync)
-            if self.config.monitoring.mode.value == "poll":
-                tasks.append(asyncio.create_task(self._poll_loop_with_metrics(), name="poll_loop"))
-            else:
+            # Monitoring: always run poll loop for trade detection
+            tasks.append(asyncio.create_task(self._poll_loop_with_metrics(), name="poll_loop"))
+
+            # WebSocket: also run for real-time market data
+            if self.config.monitoring.mode.value == "websocket":
                 tasks.append(asyncio.create_task(self._run_websocket(), name="ws_loop"))
 
             # Settlement
@@ -151,6 +159,8 @@ class Application:
                 for t in tasks:
                     if not t.done():
                         t.cancel()
+                if self.telegram_bot:
+                    await self.telegram_bot.stop()
                 if self.notifier:
                     await self.notifier.stop()
                 await self.db.close()
