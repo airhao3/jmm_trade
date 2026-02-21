@@ -217,14 +217,20 @@ class PolymarketClient:
     # ── Gamma API ────────────────────────────────────────
 
     async def get_market(self, condition_id: str) -> Dict:
-        """GET /markets/{id} – market metadata."""
-        url = f"{self.config.base_urls['gamma']}/markets/{condition_id}"
-        return await self._request("GET", url)
+        """GET /markets?condition_id= – market metadata."""
+        url = f"{self.config.base_urls['gamma']}/markets"
+        data = await self._request("GET", url, params={"condition_id": condition_id})
+        if isinstance(data, list):
+            return data[0] if data else {}
+        return data
 
     async def get_event(self, event_id: str) -> Dict:
-        """GET /events/{id} – event metadata."""
-        url = f"{self.config.base_urls['gamma']}/events/{event_id}"
-        return await self._request("GET", url)
+        """GET /events?id= – event metadata."""
+        url = f"{self.config.base_urls['gamma']}/events"
+        data = await self._request("GET", url, params={"id": event_id})
+        if isinstance(data, list):
+            return data[0] if data else {}
+        return data
 
     async def search_markets(
         self, query: str, limit: int = 20

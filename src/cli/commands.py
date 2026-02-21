@@ -93,13 +93,7 @@ def export(ctx: click.Context, output: str | None) -> None:
         db = Database(config.database)
         await db.connect()
         try:
-            trades = await db.get_open_trades()
-            # Also include settled
-            async with db._db.execute(
-                "SELECT * FROM sim_trades ORDER BY created_at"
-            ) as cur:
-                rows = await cur.fetchall()
-                all_trades = [dict(r) for r in rows]
+            all_trades = await db.get_all_trades()
 
             if not all_trades:
                 click.echo("No trades to export.")

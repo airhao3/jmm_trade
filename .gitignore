@@ -25,3 +25,4 @@ Thumbs.db
 *.egg-info/
 dist/
 build/
+data/test_e2e.db

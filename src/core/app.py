@@ -368,7 +368,7 @@ class Application:
         while True:
             await asyncio.sleep(interval)
             try:
-                trades = await self.db.get_open_trades()
+                trades = await self.db.get_all_trades()
                 if trades:
                     await export_trades_to_csv(trades, self.config.export)
             except Exception:

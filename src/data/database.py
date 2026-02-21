@@ -200,6 +200,14 @@ class Database:
             rows = await cur.fetchall()
             return [dict(r) for r in rows]
 
+    async def get_all_trades(self) -> List[Dict[str, Any]]:
+        """Return all sim trades (OPEN, FAILED, SETTLED)."""
+        async with self._db.execute(
+            "SELECT * FROM sim_trades ORDER BY created_at"
+        ) as cur:
+            rows = await cur.fetchall()
+            return [dict(r) for r in rows]
+
     async def settle_trade(
         self,
         trade_id: str,
