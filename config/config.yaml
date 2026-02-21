@@ -7,8 +7,8 @@ system:
   force_read_only: true
 
 monitoring:
-  mode: "poll"            # poll | websocket
-  poll_interval: 1        # 1s for fast detection in short-term markets
+  mode: "websocket"       # websocket for real-time ~0 latency detection
+  poll_interval: 1        # fallback if websocket fails
   max_concurrent: 5       # max concurrent API requests
   retry_on_error: true
   max_retries: 3
