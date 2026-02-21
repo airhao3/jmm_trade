@@ -24,6 +24,7 @@ on:
 
 env:
   FORCE_READ_ONLY: "true"
+  PYTHONPATH: ${{ github.workspace }}
 
 jobs:
   e2e:

@@ -8,6 +8,7 @@ on:
 
 env:
   FORCE_READ_ONLY: "true"
+  PYTHONPATH: ${{ github.workspace }}
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -57,6 +58,8 @@ jobs:
 
       - name: Validate config
         run: python main.py check-config
+        env:
+          PYTHONPATH: ${{ github.workspace }}
 
       - name: Run unit tests
         run: pytest tests/ -m "unit" -v --tb=short
@@ -89,11 +92,13 @@ jobs:
       - name: Check for private keys in code
         run: |
           echo "Scanning for potential private keys (64-char hex)..."
-          if git grep -lE '0x[a-fA-F0-9]{64}' -- '*.py' '*.yaml' '*.yml' '*.env'; then
+          # Exclude test fixtures and config (contain conditionId which is 0x+64hex market ID)
+          if git grep -lE '0x[a-fA-F0-9]{64}' -- '*.py' '*.yaml' '*.yml' '*.env' \
+               ':!tests/*' ':!config/*' ':!docs/*'; then
             echo "::error::Possible private key found in source files!"
             exit 1
           fi
-          echo "✓ No private keys found"
+          echo "✓ No private keys found in src/"
 
       - name: Verify read-only guards
         run: |
