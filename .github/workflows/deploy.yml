@@ -1,0 +1,154 @@
+name: Deploy to VPS
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "Deployment environment"
+        required: true
+        default: "production"
+        type: choice
+        options:
+          - production
+          - staging
+
+  push:
+    branches:
+      - main
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".github/workflows/ci.yml"
+      - ".github/workflows/e2e.yml"
+      - ".github/workflows/release.yml"
+
+env:
+  FORCE_READ_ONLY: "true"
+
+jobs:
+  deploy:
+    name: Deploy to VPS
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment || 'production' }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt ruff
+
+      - name: Lint check
+        run: ruff check src/ tests/ main.py
+
+      - name: Run tests
+        run: pytest tests/ -m "unit or integration" -v --tb=short
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script_stop: true
+          script: |
+            set -e
+            echo "=== Starting deployment ==="
+            
+            # Navigate to project directory
+            cd ~/jmm_trade || { echo "Project directory not found"; exit 1; }
+            
+            # Backup current database
+            echo "Backing up database..."
+            if [ -f data/trades.db ]; then
+              cp data/trades.db data/trades_backup_$(date +%Y%m%d_%H%M%S).db
+            fi
+            
+            # Pull latest code
+            echo "Pulling latest code from GitHub..."
+            git fetch origin
+            git reset --hard origin/main
+            
+            # Activate virtual environment
+            echo "Activating virtual environment..."
+            source .venv/bin/activate
+            
+            # Update dependencies
+            echo "Installing/updating dependencies..."
+            pip install --upgrade pip
+            pip install -r requirements.txt
+            
+            # Validate configuration
+            echo "Validating configuration..."
+            python main.py check-config
+            
+            # Restart service
+            echo "Restarting systemd service..."
+            sudo systemctl restart polymarket-bot
+            
+            # Wait for service to start
+            sleep 3
+            
+            # Check service status
+            echo "Checking service status..."
+            sudo systemctl is-active --quiet polymarket-bot && echo "✓ Service is running" || { echo "✗ Service failed to start"; exit 1; }
+            
+            # Show recent logs
+            echo "Recent logs:"
+            sudo journalctl -u polymarket-bot -n 10 --no-pager
+            
+            echo "=== Deployment completed successfully ==="
+
+      - name: Health check
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script: |
+            cd ~/jmm_trade
+            source .venv/bin/activate
+            
+            # Wait a bit for the service to stabilize
+            sleep 5
+            
+            # Check if service is running
+            if ! sudo systemctl is-active --quiet polymarket-bot; then
+              echo "::error::Service is not running after deployment"
+              sudo journalctl -u polymarket-bot -n 20 --no-pager
+              exit 1
+            fi
+            
+            # Check if database exists and is accessible
+            if [ ! -f data/trades.db ]; then
+              echo "::warning::Database file not found (first run?)"
+            else
+              echo "✓ Database file exists"
+            fi
+            
+            # Display stats (will fail gracefully if no data yet)
+            echo "Current statistics:"
+            python main.py stats || echo "No trades yet"
+            
+            echo "✓ Health check passed"
+
+      - name: Notify deployment status
+        if: always()
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: 22
+          script: |
+            echo "Deployment finished at $(date)"
+            echo "Commit: ${{ github.sha }}"
+            echo "Status: ${{ job.status }}"

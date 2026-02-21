@@ -1,0 +1,20 @@
+[Unit]
+Description=Polymarket Copy Trading Bot
+After=network.target
+
+[Service]
+Type=simple
+User=trader
+WorkingDirectory=/home/trader/jmm_trade
+Environment="PATH=/home/trader/jmm_trade/.venv/bin"
+Environment="FORCE_READ_ONLY=true"
+ExecStart=/home/trader/jmm_trade/.venv/bin/python main.py run
+Restart=always
+RestartSec=10
+
+# 日志
+StandardOutput=append:/home/trader/jmm_trade/logs/bot.log
+StandardError=append:/home/trader/jmm_trade/logs/bot.error.log
+
+[Install]
+WantedBy=multi-user.target

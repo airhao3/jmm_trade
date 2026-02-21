@@ -112,6 +112,43 @@ All configuration lives in `config/config.yaml`. Key sections:
 └── docker-compose.yml          # One-command deploy
 ```
 
+## VPS Deployment
+
+**推荐用于 24/7 运行和最低延迟（~50ms API latency）**
+
+### 快速部署
+
+```bash
+# 1. SSH 到 VPS (Ubuntu 22.04, US East 推荐)
+ssh your_user@YOUR_VPS_IP
+
+# 2. 运行一键设置脚本
+curl -fsSL https://raw.githubusercontent.com/airhao3/jmm_trade/main/deploy/setup_vps.sh -o setup_vps.sh
+bash setup_vps.sh
+
+# 3. 编辑配置（可选）
+nano .env
+
+# 4. 启动服务
+sudo systemctl start polymarket-bot
+sudo systemctl enable polymarket-bot
+
+# 5. 查看状态
+sudo systemctl status polymarket-bot
+journalctl -u polymarket-bot -f
+```
+
+### CI/CD 自动部署
+
+配置 GitHub Actions 后，每次推送到 `main` 分支自动部署到 VPS。
+
+**配置步骤**:
+1. 在 GitHub 仓库添加 Secrets: `VPS_HOST`, `VPS_USER`, `VPS_SSH_KEY`
+2. 推送代码，自动触发部署工作流
+3. 查看 Actions 页面确认部署成功
+
+**详细文档**: [`docs/VPS_DEPLOYMENT.md`](docs/VPS_DEPLOYMENT.md)
+
 ## Docker
 
 ```bash
@@ -130,6 +167,8 @@ docker-compose down
 | Document | Description |
 |----------|-------------|
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Full system architecture, module reference, DB schema, config reference, API endpoints, safety design |
+| [`docs/VPS_DEPLOYMENT.md`](docs/VPS_DEPLOYMENT.md) | **VPS deployment guide**, manual setup, CI/CD auto-deploy, configuration, monitoring, troubleshooting |
+| [`docs/DEPLOYMENT_ASSESSMENT.md`](docs/DEPLOYMENT_ASSESSMENT.md) | VPS feasibility analysis, latency benchmarks, performance expectations, optimization roadmap |
 | [`docs/TESTING.md`](docs/TESTING.md) | Test strategy, test case catalog (60+ cases), running tests, coverage goals, writing new tests |
 | [`docs/CONTRIBUTING.md`](docs/CONTRIBUTING.md) | Development workflow, code conventions, **AI coding assistant guide**, debugging scenarios, security checklist |
 | [`docs/CICD.md`](docs/CICD.md) | CI/CD pipeline design, GitHub Actions workflows, deployment procedures, monitoring & alerting |
