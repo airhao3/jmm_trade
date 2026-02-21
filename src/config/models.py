@@ -54,8 +54,8 @@ class SimulationConfig(BaseModel):
     @field_validator("delays")
     @classmethod
     def validate_delays(cls, v: List[int]) -> List[int]:
-        if not all(d > 0 for d in v):
-            raise ValueError("All delays must be positive integers")
+        if not all(d >= 0 for d in v):
+            raise ValueError("All delays must be non-negative integers")
         return sorted(set(v))
 
 

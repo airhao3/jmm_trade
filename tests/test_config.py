@@ -24,7 +24,7 @@ def test_valid_config_loads(raw_config_dict):
     config = AppConfig(**raw_config_dict)
     assert config.system.read_only_mode is True
     assert len(config.get_active_targets()) == 1
-    assert config.monitoring.poll_interval == 3
+    assert config.monitoring.poll_interval == 1
 
 
 # ── C02: Invalid address rejected ────────────────────────
@@ -50,9 +50,9 @@ def test_negative_delay_rejected():
 
 
 @pytest.mark.unit
-def test_zero_delay_rejected():
-    with pytest.raises(Exception):
-        SimulationConfig(delays=[0, 3])
+def test_zero_delay_accepted():
+    sim = SimulationConfig(delays=[0, 3])
+    assert sim.delays == [0, 3]
 
 
 # ── C04: Delays auto-sorted and deduplicated ────────────

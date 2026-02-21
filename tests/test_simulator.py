@@ -18,7 +18,7 @@ async def test_buy_uses_best_ask(sample_config, mock_api_client, db, sample_trad
     simulator = TradeSimulator(sample_config, mock_api_client, db)
     results = await simulator.simulate(sample_target, sample_trade)
 
-    assert len(results) == 2  # delays [1, 3]
+    assert len(results) == 3  # delays [0, 1, 3]
     for r in results:
         assert r.sim_price == 0.57  # best ask from sample_orderbook
 
@@ -109,9 +109,10 @@ async def test_multiple_delays_produce_two_records(sample_config, mock_api_clien
     simulator = TradeSimulator(sample_config, mock_api_client, db)
     results = await simulator.simulate(sample_target, sample_trade)
 
-    assert len(results) == 2
-    assert results[0].sim_delay == 1
-    assert results[1].sim_delay == 3
+    assert len(results) == 3
+    assert results[0].sim_delay == 0
+    assert results[1].sim_delay == 1
+    assert results[2].sim_delay == 3
 
 
 @pytest.mark.integration
@@ -123,7 +124,7 @@ async def test_deduplication(sample_config, mock_api_client, db, sample_trade, s
     results1 = await simulator.simulate(sample_target, sample_trade)
     results2 = await simulator.simulate(sample_target, sample_trade)
 
-    assert len(results1) == 2
+    assert len(results1) == 3
     assert len(results2) == 0  # all skipped as duplicates
 
 
@@ -136,7 +137,7 @@ async def test_api_error_produces_failed_record(sample_config, mock_api_client, 
     simulator = TradeSimulator(sample_config, mock_api_client, db)
     results = await simulator.simulate(sample_target, sample_trade)
 
-    assert len(results) == 2
+    assert len(results) == 3
     for r in results:
         assert r.sim_success is False
         assert r.status == "FAILED"

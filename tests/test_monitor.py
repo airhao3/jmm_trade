@@ -100,7 +100,7 @@ async def test_filter_keyword_miss(sample_config, mock_api_client, sample_trade)
 async def test_filter_duration_out_of_range(sample_config, mock_api_client, sample_trade):
     """Trade with duration > max should be filtered."""
     trade = deepcopy(sample_trade)
-    trade["title"] = "BTC up 30 minutes"
+    trade["title"] = "BTC up 90 minutes"
     monitor = TradeMonitor(sample_config, mock_api_client)
     assert monitor._passes_market_filter(trade) is False
 

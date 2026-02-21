@@ -22,19 +22,19 @@ def raw_config_dict() -> Dict[str, Any]:
     """Minimal valid config dict for constructing AppConfig."""
     return {
         "system": {"read_only_mode": True, "force_read_only": True},
-        "monitoring": {"mode": "poll", "poll_interval": 3, "max_concurrent": 5},
+        "monitoring": {"mode": "poll", "poll_interval": 1, "max_concurrent": 5},
         "simulation": {
-            "delays": [1, 3],
+            "delays": [0, 1, 3],
             "investment_per_trade": 100.0,
             "fee_rate": 0.015,
             "enable_slippage_check": True,
-            "max_slippage_pct": 5.0,
+            "max_slippage_pct": 50.0,
         },
         "market_filter": {
             "enabled": True,
             "assets": ["BTC", "ETH", "Bitcoin", "Ethereum"],
             "min_duration_minutes": 5,
-            "max_duration_minutes": 15,
+            "max_duration_minutes": 60,
             "keywords": ["up", "down", "higher", "lower"],
             "exclude_keywords": ["week", "month", "year"],
         },

@@ -8,17 +8,17 @@ system:
 
 monitoring:
   mode: "poll"            # poll | websocket
-  poll_interval: 3        # seconds between polls
+  poll_interval: 1        # seconds between polls (reduced for faster detection)
   max_concurrent: 5       # max concurrent API requests
   retry_on_error: true
   max_retries: 3
 
 simulation:
-  delays: [1, 3]          # seconds to wait before sampling orderbook
+  delays: [0, 1, 3]       # 0s=instant, 1s/3s=delayed snapshots
   investment_per_trade: 100.0
   fee_rate: 0.015         # 1.5%
   enable_slippage_check: true
-  max_slippage_pct: 5.0
+  max_slippage_pct: 50.0  # record most trades for analysis (was 5.0)
 
 market_filter:
   enabled: true
@@ -28,7 +28,7 @@ market_filter:
     - "Bitcoin"
     - "Ethereum"
   min_duration_minutes: 5
-  max_duration_minutes: 15
+  max_duration_minutes: 60  # include 15/30/60min markets (was 15)
   keywords:
     - "up"
     - "down"
