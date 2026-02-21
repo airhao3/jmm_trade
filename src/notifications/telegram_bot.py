@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from loguru import logger
 
 from src.config.models import TelegramConfig
@@ -63,28 +65,32 @@ class TelegramBotHandler:
             BotCommand("help", "Show help"),
         ])
 
-        # Start polling in background
+        # Allow disabling bot commands via env (useful when VPS already runs one)
+        if os.getenv("TELEGRAM_BOT_COMMANDS", "true").lower() == "false":
+            logger.info("Telegram bot commands disabled via TELEGRAM_BOT_COMMANDS=false")
+            self._app = None
+            return
+
         self._running = True
-        self._conflict_logged = False
         await self._app.initialize()
         await self._app.start()
-
-        async def _error_handler(update, context) -> None:
-            """Handle polling errors gracefully."""
-            err = context.error
-            if err and "Conflict" in str(err):
-                if not self._conflict_logged:
-                    self._conflict_logged = True
-                    logger.warning(
-                        "Telegram bot conflict: another instance is already polling. "
-                        "Bot commands disabled for this instance."
-                    )
-            else:
-                logger.error(f"Telegram bot error: {err}")
-
-        self._app.add_error_handler(_error_handler)
-        await self._app.updater.start_polling(drop_pending_updates=True)
+        await self._app.updater.start_polling(
+            drop_pending_updates=True,
+            error_callback=self._polling_error_callback,
+        )
         logger.info("Telegram bot command handler started")
+
+    def _polling_error_callback(self, exc: Exception) -> None:
+        """Suppress Conflict traceback spam from polling loop."""
+        if "Conflict" in str(exc):
+            if not getattr(self, "_conflict_warned", False):
+                self._conflict_warned = True
+                logger.warning(
+                    "Telegram bot conflict: another instance is polling. "
+                    "Stop the other instance or set TELEGRAM_BOT_COMMANDS=false"
+                )
+        else:
+            logger.error(f"Telegram polling error: {exc}")
 
     async def stop(self) -> None:
         """Stop the Telegram bot."""
