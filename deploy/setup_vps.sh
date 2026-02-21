@@ -26,16 +26,13 @@ if [ "$EUID" -eq 0 ]; then
         echo "[ROOT] ✓ 用户 $DEPLOY_USER 已存在"
     fi
     
-    # 1.2 配置 NOPASSWD sudo 权限（幂等操作）
+    # 1.2 配置 NOPASSWD sudo 权限（总是更新确保正确）
     SUDOERS_FILE="/etc/sudoers.d/$DEPLOY_USER"
-    if [ ! -f "$SUDOERS_FILE" ]; then
-        echo "[ROOT] 配置 sudo NOPASSWD 权限..."
-        echo "$DEPLOY_USER ALL=(ALL) NOPASSWD: /bin/systemctl, /usr/bin/journalctl" > "$SUDOERS_FILE"
-        chmod 440 "$SUDOERS_FILE"
-        echo "[ROOT] ✓ sudo 权限已配置"
-    else
-        echo "[ROOT] ✓ sudo 权限已存在"
-    fi
+    SUDOERS_CONTENT="$DEPLOY_USER ALL=(ALL) NOPASSWD: ALL"
+    echo "[ROOT] 配置 sudo NOPASSWD 权限..."
+    echo "$SUDOERS_CONTENT" > "$SUDOERS_FILE"
+    chmod 440 "$SUDOERS_FILE"
+    echo "[ROOT] ✓ sudo 权限已配置 (NOPASSWD: ALL)"
     
     # 1.3 同步 SSH 密钥（从 root 到部署用户）
     if [ -f "/root/.ssh/authorized_keys" ]; then
