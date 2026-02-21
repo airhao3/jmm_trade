@@ -115,7 +115,16 @@ class SettlementEngine:
 
         if is_resolved:
             # Polymarket resolution: winning outcome resolves to 1.0, losing to 0.0
-            resolution_price = float(market_data.get("outcomePrices", [0])[0])
+            # outcomePrices may be a JSON string or a list
+            outcome_prices = market_data.get("outcomePrices", [0])
+            if isinstance(outcome_prices, str):
+                import json
+                try:
+                    outcome_prices = json.loads(outcome_prices)
+                except (json.JSONDecodeError, TypeError):
+                    outcome_prices = [0]
+            if outcome_prices:
+                resolution_price = float(outcome_prices[0])
 
         await self.db.upsert_market_cache(
             MarketInfo(
