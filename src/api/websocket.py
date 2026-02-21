@@ -53,8 +53,11 @@ class PolymarketWebSocket:
     async def subscribe(self, asset_ids: list[str]) -> None:
         """Subscribe to asset IDs (market channel)."""
         self._subscribed_assets = list(set(self._subscribed_assets + asset_ids))
-        if self._ws and self._ws.open:
-            await self._send_subscription()
+        if self._ws:
+            try:
+                await self._send_subscription()
+            except Exception:
+                pass  # Connection might be closed
 
     async def unsubscribe(self, asset_ids: list[str]) -> None:
         """Unsubscribe from asset IDs."""
@@ -90,8 +93,11 @@ class PolymarketWebSocket:
     async def stop(self) -> None:
         """Gracefully stop the WebSocket loop."""
         self._running = False
-        if self._ws and self._ws.open:
-            await self._ws.close()
+        if self._ws:
+            try:
+                await self._ws.close()
+            except Exception:
+                pass  # Already closed
 
     # ── Private ──────────────────────────────────────────
 
@@ -125,7 +131,7 @@ class PolymarketWebSocket:
 
     async def _send_subscription(self) -> None:
         """Send subscription message for the market channel."""
-        if not self._ws or not self._ws.open:
+        if not self._ws:
             return
 
         if self.channel == "market":
@@ -171,7 +177,7 @@ class PolymarketWebSocket:
 
     async def _heartbeat(self) -> None:
         """Send periodic PING to keep the connection alive."""
-        while self._running and self._ws and self._ws.open:
+        while self._running and self._ws:
             try:
                 await self._ws.ping()
                 logger.debug("WebSocket PING sent")
