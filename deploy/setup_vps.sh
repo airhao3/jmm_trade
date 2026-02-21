@@ -54,7 +54,21 @@ if [ "$EUID" -eq 0 ]; then
     # 1.4 切换到部署用户并重新执行脚本
     echo "[ROOT] 切换到用户 $DEPLOY_USER 并继续执行..."
     echo "=========================================="
-    exec su - "$DEPLOY_USER" -c "bash $0"
+    
+    # 检查脚本是否通过管道执行（curl | bash）
+    if [ ! -f "$0" ] || [ "$0" = "bash" ] || [ "$0" = "/bin/bash" ] || [ "$0" = "/usr/bin/bash" ]; then
+        # 通过管道执行，需要下载脚本到临时文件
+        SCRIPT_URL="https://raw.githubusercontent.com/airhao3/jmm_trade/main/deploy/setup_vps.sh"
+        TEMP_SCRIPT="/tmp/setup_vps_$$.sh"
+        echo "[ROOT] 下载脚本到临时文件..."
+        curl -sSL "$SCRIPT_URL" -o "$TEMP_SCRIPT"
+        chmod +x "$TEMP_SCRIPT"
+        chown "$DEPLOY_USER:$DEPLOY_USER" "$TEMP_SCRIPT"
+        exec su - "$DEPLOY_USER" -c "bash $TEMP_SCRIPT && rm -f $TEMP_SCRIPT"
+    else
+        # 直接执行脚本文件
+        exec su - "$DEPLOY_USER" -c "bash $0"
+    fi
     exit 0
 fi
 
