@@ -51,7 +51,56 @@ if [ "$EUID" -eq 0 ]; then
         echo "[ROOT] ⚠ /root/.ssh/authorized_keys 不存在，跳过密钥同步"
     fi
     
-    # 1.4 切换到部署用户并重新执行脚本
+    # 1.4 系统级性能优化（在 root 阶段完成）
+    echo "[ROOT] 应用系统级性能优化..."
+    
+    # 文件描述符限制
+    LIMITS_FILE="/etc/security/limits.conf"
+    if ! grep -q "$DEPLOY_USER.*nofile" "$LIMITS_FILE" 2>/dev/null; then
+        echo "[ROOT] 配置文件描述符限制 (nofile=65535)..."
+        echo "$DEPLOY_USER soft nofile 65535" >> "$LIMITS_FILE"
+        echo "$DEPLOY_USER hard nofile 65535" >> "$LIMITS_FILE"
+        echo "[ROOT] ✓ 文件描述符限制已提升"
+    else
+        echo "[ROOT] ✓ 文件描述符限制已配置"
+    fi
+    
+    # TCP 优化
+    if ! grep -q "net.ipv4.tcp_tw_reuse" /etc/sysctl.conf 2>/dev/null; then
+        echo "[ROOT] 配置 TCP 优化..."
+        echo "# Polymarket Bot - Network Optimization" >> /etc/sysctl.conf
+        echo "net.ipv4.tcp_tw_reuse = 1" >> /etc/sysctl.conf
+        echo "net.ipv4.tcp_fin_timeout = 30" >> /etc/sysctl.conf
+        sysctl -p > /dev/null 2>&1 || echo "[ROOT] ⚠ sysctl 应用失败（需要重启生效）"
+        echo "[ROOT] ✓ TCP 优化已配置"
+    else
+        echo "[ROOT] ✓ TCP 优化已存在"
+    fi
+    
+    # 1.5 安装系统依赖（在 root 阶段完成）
+    echo "[ROOT] 检查并安装系统依赖..."
+    
+    if ! command -v python3.11 &> /dev/null; then
+        echo "[ROOT] 安装 Python 3.11..."
+        apt update > /dev/null 2>&1
+        apt install -y software-properties-common > /dev/null 2>&1
+        add-apt-repository ppa:deadsnakes/ppa -y > /dev/null 2>&1
+        apt update > /dev/null 2>&1
+        apt install -y python3.11 python3.11-venv python3.11-dev > /dev/null 2>&1
+        echo "[ROOT] ✓ Python 3.11 已安装"
+    else
+        echo "[ROOT] ✓ Python 3.11 已存在"
+    fi
+    
+    if ! command -v git &> /dev/null; then
+        echo "[ROOT] 安装 Git..."
+        apt install -y git > /dev/null 2>&1
+        echo "[ROOT] ✓ Git 已安装"
+    else
+        echo "[ROOT] ✓ Git 已存在"
+    fi
+    
+    # 1.6 切换到部署用户并重新执行脚本
     echo "[ROOT] 切换到用户 $DEPLOY_USER 并继续执行..."
     echo "=========================================="
     
@@ -97,62 +146,7 @@ success() {
 }
 
 # ============================================
-# 3. 系统级性能优化 (Low-Latency Tuning)
-# ============================================
-info "应用系统级性能优化..."
-
-# 3.1 提升文件描述符限制（幂等操作）
-LIMITS_FILE="/etc/security/limits.conf"
-CURRENT_USER=$(whoami)
-
-if ! grep -q "$CURRENT_USER.*nofile" "$LIMITS_FILE" 2>/dev/null; then
-    info "配置文件描述符限制 (nofile=65535)..."
-    echo "$CURRENT_USER soft nofile 65535" | sudo tee -a "$LIMITS_FILE" > /dev/null
-    echo "$CURRENT_USER hard nofile 65535" | sudo tee -a "$LIMITS_FILE" > /dev/null
-    success "文件描述符限制已提升"
-else
-    success "文件描述符限制已配置"
-fi
-
-# 3.2 网络优化 - TCP 快速回收（可选，需要 root 权限）
-info "应用网络优化（TCP 快速回收）..."
-if [ -w /etc/sysctl.conf ]; then
-    # 检查是否已配置（幂等）
-    if ! grep -q "net.ipv4.tcp_tw_reuse" /etc/sysctl.conf 2>/dev/null; then
-        echo "# Polymarket Bot - Network Optimization" | sudo tee -a /etc/sysctl.conf > /dev/null
-        echo "net.ipv4.tcp_tw_reuse = 1" | sudo tee -a /etc/sysctl.conf > /dev/null
-        echo "net.ipv4.tcp_fin_timeout = 30" | sudo tee -a /etc/sysctl.conf > /dev/null
-        sudo sysctl -p > /dev/null 2>&1 || warn "sysctl 应用失败（需要重启生效）"
-        success "网络优化已配置"
-    else
-        success "网络优化已存在"
-    fi
-else
-    warn "无权限修改 sysctl.conf，跳过网络优化（非必需）"
-fi
-
-# ============================================
-# 4. 检查系统依赖
-# ============================================
-info "检查系统环境..."
-if ! command -v python3.11 &> /dev/null; then
-    warn "Python 3.11 未安装，正在安装..."
-    sudo apt update
-    sudo apt install -y software-properties-common
-    sudo add-apt-repository ppa:deadsnakes/ppa -y
-    sudo apt update
-    sudo apt install -y python3.11 python3.11-venv python3.11-dev
-fi
-
-if ! command -v git &> /dev/null; then
-    warn "Git 未安装，正在安装..."
-    sudo apt install -y git
-fi
-
-success "系统环境检查完成"
-
-# ============================================
-# 5. 克隆或更新代码
+# 3. 克隆或更新代码
 # ============================================
 if [ -d "$HOME/jmm_trade" ]; then
     warn "项目目录已存在，跳过克隆"
@@ -166,7 +160,7 @@ else
 fi
 
 # ============================================
-# 6. 创建虚拟环境
+# 4. 创建虚拟环境
 # ============================================
 if [ ! -d ".venv" ]; then
     info "创建 Python 虚拟环境..."
@@ -179,7 +173,7 @@ pip install --upgrade pip > /dev/null
 pip install -r requirements.txt
 
 # ============================================
-# 7. 配置环境变量（环境预热）
+# 5. 配置环境变量（环境预热）
 # ============================================
 if [ ! -f ".env" ]; then
     info "创建 .env 配置文件..."
@@ -207,13 +201,13 @@ else
 fi
 
 # ============================================
-# 8. 创建必要目录
+# 6. 创建必要目录
 # ============================================
 info "创建数据和日志目录..."
 mkdir -p data data/exports logs
 
 # ============================================
-# 9. 验证配置
+# 7. 验证配置
 # ============================================
 info "验证配置..."
 if python main.py check-config; then
@@ -224,7 +218,7 @@ else
 fi
 
 # ============================================
-# 10. 创建 systemd 服务
+# 8. 创建 systemd 服务
 # ============================================
 info "创建 systemd 服务..."
 SERVICE_FILE="/etc/systemd/system/polymarket-bot.service"
@@ -260,7 +254,7 @@ EOF
 success "systemd 服务文件已创建: $SERVICE_FILE"
 
 # ============================================
-# 11. 一键启动流程（自动化）
+# 9. 一键启动流程（自动化）
 # ============================================
 info "重载 systemd 配置..."
 sudo systemctl daemon-reload
@@ -287,7 +281,7 @@ else
 fi
 
 # ============================================
-# 12. 完成提示和日志引导
+# 10. 完成提示和日志引导
 # ============================================
 echo ""
 echo -e "${GREEN}==========================================${NC}"
