@@ -7,60 +7,98 @@ from pathlib import Path
 
 from loguru import logger
 
-from src.config.models import LogFormat, LoggingConfig
+from src.config.models import LoggingConfig
+
+
+# Global dashboard instance (set by application)
+_dashboard = None
+
+
+def set_dashboard(dashboard) -> None:
+    """Set the global dashboard instance for live mode."""
+    global _dashboard
+    _dashboard = dashboard
+
+
+def get_dashboard():
+    """Get the global dashboard instance."""
+    return _dashboard
 
 
 def setup_logger(config: LoggingConfig) -> None:
-    """Configure loguru with console + file + optional metrics sink."""
+    """Configure loguru with console + file outputs based on mode."""
     # Remove default handler
     logger.remove()
 
-    # ── Console (always human-readable) ──────────────────
-    logger.add(
-        sys.stdout,
-        format=(
-            "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
-            "<level>{level: <8}</level> | "
-            "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
-            "<level>{message}</level>"
-        ),
-        level=config.level,
-        colorize=True,
-    )
-
-    # ── Application log file ─────────────────────────────
+    # Create logs directory
     log_dir = Path("logs")
     log_dir.mkdir(parents=True, exist_ok=True)
 
-    if config.format == LogFormat.JSON:
+    # ── Console output (only if not in live mode) ────────
+    if config.console.enabled and config.console.mode != "live":
+        # Traditional scrolling console output
         logger.add(
-            str(log_dir / "app.log"),
+            sys.stdout,
+            format=(
+                "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+                "<level>{level: <8}</level> | "
+                "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - "
+                "<level>{message}</level>"
+            ),
             level=config.level,
-            rotation=config.rotation,
-            retention=config.retention,
-            serialize=True,
+            colorize=config.console.colors.enabled,
         )
-    else:
+    # In live mode, console output is suppressed (dashboard handles it)
+
+    # ── Main log file ─────────────────────────────────────
+    if config.files.main.enabled:
         logger.add(
-            str(log_dir / "app.log"),
+            str(log_dir / Path(config.files.main.path).name),
+            level=config.files.main.level,
             format=(
                 "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | "
                 "{name}:{function}:{line} - {message}"
             ),
-            level=config.level,
-            rotation=config.rotation,
-            retention=config.retention,
+            rotation=config.files.main.rotation,
+            retention=config.files.main.retention,
+            filter=lambda record: not record["extra"].get("metrics", False),
         )
 
-    # ── Metrics log (filtered by extra.metrics flag) ─────
-    if config.metrics_enabled:
+    # ── Trades log file ───────────────────────────────────
+    if config.files.trades.enabled:
         logger.add(
-            str(log_dir / "metrics.log"),
-            filter=lambda record: record["extra"].get("metrics", False),
-            format="{message}",
-            rotation="100 MB",
-            retention="7 days",
-            serialize=True,
+            str(log_dir / Path(config.files.trades.path).name),
+            level=config.files.trades.level,
+            format="{time:YYYY-MM-DD HH:mm:ss} | {message}",
+            rotation=config.files.trades.rotation,
+            retention=config.files.trades.retention,
+            filter=lambda record: record["extra"].get("trade", False),
         )
 
-    logger.info(f"Logger initialised: level={config.level} format={config.format.value}")
+    # ── Metrics log file ──────────────────────────────────
+    if config.files.metrics.enabled:
+        logger.add(
+            str(log_dir / Path(config.files.metrics.path).name),
+            level=config.files.metrics.level,
+            format="{message}",
+            rotation=config.files.metrics.rotation,
+            retention=config.files.metrics.retention,
+            serialize=True,
+            filter=lambda record: record["extra"].get("metrics", False),
+        )
+
+    # ── Errors log file ───────────────────────────────────
+    if config.files.errors.enabled:
+        logger.add(
+            str(log_dir / Path(config.files.errors.path).name),
+            level=config.files.errors.level,
+            format=(
+                "{time:YYYY-MM-DD HH:mm:ss.SSS} | {level: <8} | "
+                "{name}:{function}:{line} - {message}\n{exception}"
+            ),
+            rotation=config.files.errors.rotation,
+            retention=config.files.errors.retention,
+        )
+
+    mode_str = f"mode={config.console.mode}" if config.console.enabled else "console=disabled"
+    logger.info(f"Logger initialised: level={config.level} {mode_str}")

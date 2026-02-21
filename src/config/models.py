@@ -161,13 +161,60 @@ class ExportConfig(BaseModel):
 
 
 # ── Logging ──────────────────────────────────────────────
-class LoggingConfig(BaseModel):
+class ConsoleLayoutConfig(BaseModel):
+    sections: list[str] = Field(default=["system_status", "dashboard", "recent_trades", "event_stream"])
+    limits: dict[str, int] = Field(default={"recent_trades": 5, "event_stream": 10})
+
+
+class ConsoleColorsConfig(BaseModel):
+    enabled: bool = True
+    scheme: str = "professional"
+
+
+class ConsoleEventsConfig(BaseModel):
+    show: list[str] = Field(default=["system", "trade", "simulation", "notification", "settlement", "error", "warning"])
+    hide: list[str] = Field(default=["debug"])
+
+
+class ConsoleConfig(BaseModel):
+    enabled: bool = True
+    mode: str = "live"  # live | scroll | minimal
+    refresh_interval: float = Field(ge=0.1, le=5.0, default=1.0)
+    layout: ConsoleLayoutConfig = Field(default_factory=ConsoleLayoutConfig)
+    colors: ConsoleColorsConfig = Field(default_factory=ConsoleColorsConfig)
+    events: ConsoleEventsConfig = Field(default_factory=ConsoleEventsConfig)
+
+
+class FileLogConfig(BaseModel):
+    enabled: bool = True
+    path: str
     level: str = "INFO"
-    format: LogFormat = LogFormat.JSON
+    format: str = "structured"
     rotation: str = "100 MB"
     retention: str = "30 days"
-    metrics_enabled: bool = True
-    metrics_interval: int = Field(ge=10, default=60)
+
+
+class MetricsFileConfig(BaseModel):
+    enabled: bool = True
+    path: str = "logs/metrics.json"
+    level: str = "INFO"
+    format: str = "json"
+    rotation: str = "100 MB"
+    retention: str = "7 days"
+    interval: int = Field(ge=60, default=300)
+
+
+class FilesConfig(BaseModel):
+    main: FileLogConfig = Field(default_factory=lambda: FileLogConfig(path="logs/bot.log"))
+    trades: FileLogConfig = Field(default_factory=lambda: FileLogConfig(path="logs/trades.log", format="table", retention="90 days"))
+    metrics: MetricsFileConfig = Field(default_factory=MetricsFileConfig)
+    errors: FileLogConfig = Field(default_factory=lambda: FileLogConfig(path="logs/errors.log", level="WARN", format="detailed", retention="90 days"))
+
+
+class LoggingConfig(BaseModel):
+    level: str = "INFO"
+    console: ConsoleConfig = Field(default_factory=ConsoleConfig)
+    files: FilesConfig = Field(default_factory=FilesConfig)
 
     @field_validator("level")
     @classmethod

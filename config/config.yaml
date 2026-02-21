@@ -93,8 +93,76 @@ export:
 
 logging:
   level: "INFO"
-  format: "json"          # json | text
-  rotation: "100 MB"
-  retention: "30 days"
-  metrics_enabled: true
-  metrics_interval: 60    # seconds between metric logs
+  
+  # Console display configuration
+  console:
+    enabled: true
+    mode: "live"  # live (single-page refresh) | scroll (traditional) | minimal
+    
+    # Refresh settings
+    refresh_interval: 1.0  # seconds between screen updates
+    
+    # Layout configuration
+    layout:
+      sections:
+        - system_status      # System status bar
+        - dashboard         # Monitoring dashboard
+        - recent_trades     # Recent trades table
+        - event_stream      # Live event stream
+        
+      limits:
+        recent_trades: 5    # Show last 5 trades
+        event_stream: 10    # Show last 10 events
+        
+    # Color configuration
+    colors:
+      enabled: true
+      scheme: "professional"  # professional | minimal | monochrome
+      
+    # Event filtering
+    events:
+      show:
+        - system
+        - trade
+        - simulation
+        - notification
+        - settlement
+        - error
+        - warning
+      hide:
+        - debug
+        
+  # File logging configuration (background silent recording)
+  files:
+    main:
+      enabled: true
+      path: "logs/bot.log"
+      level: "INFO"
+      format: "structured"
+      rotation: "100 MB"
+      retention: "30 days"
+      
+    trades:
+      enabled: true
+      path: "logs/trades.log"
+      level: "INFO"
+      format: "table"
+      rotation: "50 MB"
+      retention: "90 days"
+      
+    metrics:
+      enabled: true
+      path: "logs/metrics.json"
+      level: "INFO"
+      format: "json"
+      rotation: "100 MB"
+      retention: "7 days"
+      interval: 300  # 5 minutes between metric logs
+      
+    errors:
+      enabled: true
+      path: "logs/errors.log"
+      level: "WARN"
+      format: "detailed"
+      rotation: "50 MB"
+      retention: "90 days"
