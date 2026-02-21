@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  polymarket-bot:
+    build: .
+    container_name: polymarket_copy_trader
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      - FORCE_READ_ONLY=true
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./config:/app/config:ro
+    command: python main.py run --mode poll
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"

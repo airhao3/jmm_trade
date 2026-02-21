@@ -1,0 +1,8 @@
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+markers = [
+    "unit: Pure logic tests, no I/O",
+    "integration: Tests with DB or mocked API",
+    "smoke: Tests against live Polymarket API",
+]
+testpaths = ["tests"]

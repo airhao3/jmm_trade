@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  PYTHON_VERSION: "3.11"
+  FORCE_READ_ONLY: "true"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate config
+        run: python main.py check-config
+
+      - name: Run unit tests
+        run: pytest tests/ -m "unit" -v --tb=short
+
+      - name: Run integration tests
+        run: pytest tests/ -m "integration" -v --tb=short
+
+      - name: Test coverage
+        run: |
+          pip install pytest-cov
+          pytest tests/ --cov=src --cov-report=xml --cov-fail-under=50
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+
+  security:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for secrets in code
+        run: |
+          if git grep -lE '0x[a-fA-F0-9]{64}' -- '*.py' '*.yaml' '*.yml'; then
+            echo "ERROR: Possible private key found in source files!"
+            exit 1
+          fi
+
+      - name: Verify read-only guards
+        run: |
+          if grep -rn "READ_ONLY_MODE\s*=\s*False" src/; then
+            echo "ERROR: READ_ONLY_MODE must never be False!"
+            exit 1
+          fi
